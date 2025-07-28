@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Админ-панель</title>
+    <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Админ-панель</h1>
+
+        <div class="card">
+            <h2>Управление пользователями</h2>
+            <p>Здесь вы можете просматривать и изменять баланс зарегистрированных пользователей.</p>
+            <table id="users-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Telegram ID</th>
+                        <th>Имя</th>
+                        <th>Баланс</th>
+                        <th>Действие</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <h2>Содержимое кейса "All In"</h2>
+            <p>Выберите предметы, которые могут выпасть из основного кейса. Изменения сохраняются для всех игроков.</p>
+            <div id="case-items-container" class="items-grid">
+                </div>
+            <button id="save-case-btn" class="button-primary">Сохранить содержимое кейса</button>
+        </div>
+    </div>
+
+    <script src="admin.js"></script>
+</body>
+</html>
