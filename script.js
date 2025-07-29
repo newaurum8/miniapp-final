@@ -90,7 +90,6 @@ document.addEventListener('DOMContentLoaded', function() {
             STATE.userBalance = userData.balance;
             updateBalanceDisplay();
             
-            // После успешной аутентификации загружаем остальные данные
             loadInitialData();
 
         } catch (error) {
@@ -98,12 +97,29 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification('Не удалось подключиться к серверу.');
         }
     }
+    
+    async function loadUserInventory() {
+        if (!STATE.user || !STATE.user.id) return;
+        try {
+            const response = await fetch(`/api/user/inventory?user_id=${STATE.user.id}`);
+            if (!response.ok) throw new Error('Failed to load inventory');
+            STATE.inventory = await response.json();
+            
+            if (document.getElementById('profile-view').classList.contains('active')) {
+                renderInventory();
+            }
+        } catch (error) {
+            console.error("Ошибка загрузки инвентаря:", error);
+            showNotification('Не удалось загрузить инвентарь.');
+        }
+    }
+
 
     function loadTelegramData() {
         try {
             const tg = window.Telegram.WebApp;
             tg.ready();
-            tg.expand(); // Раскрываем приложение на весь экран
+            tg.expand();
             tg.BackButton.hide();
             const user = tg.initDataUnsafe.user;
             
@@ -119,7 +135,7 @@ document.addEventListener('DOMContentLoaded', function() {
                  if (UI.profileId) UI.profileId.textContent = "ID 0";
                  STATE.userBalance = 1000;
                  updateBalanceDisplay();
-                 loadInitialData(); // Загружаем данные для гостя
+                 loadInitialData(); 
             }
         } catch (error) {
             console.error("Не удалось загрузить данные Telegram:", error);
@@ -180,68 +196,40 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function switchView(viewId) {
-        UI.views.forEach(view => {
-            view.classList.remove('active');
-        });
+        UI.views.forEach(view => view.classList.remove('active'));
         UI.navButtons.forEach(btn => btn.classList.remove('active'));
 
         const viewToShow = document.getElementById(viewId);
-        let btnToActivate;
-
-        if (viewToShow) {
-            viewToShow.classList.add('active');
-            if (['upgrade-view', 'miner-view', 'coinflip-view', 'rps-view', 'slots-view', 'tower-view'].includes(viewId)) {
-                btnToActivate = document.querySelector('.nav-btn[data-view="games-menu-view"]');
-            } else {
-                btnToActivate = document.querySelector(`.nav-btn[data-view="${viewId}"]`);
-            }
-        } else {
-            console.error(`Экран с ID "${viewId}" не найден. Возврат на главный экран.`);
-            document.getElementById('game-view').classList.add('active');
-            btnToActivate = document.querySelector('.nav-btn[data-view="game-view"]');
-        }
-
-        if (btnToActivate) {
-            btnToActivate.classList.add('active');
-        }
+        const btnToActivate = document.querySelector(`.nav-btn[data-view="${viewId}"]`) || 
+                              document.querySelector('.nav-btn[data-view="games-menu-view"]');
+        
+        if (viewToShow) viewToShow.classList.add('active');
+        if (btnToActivate) btnToActivate.classList.add('active');
 
         if (window.Telegram && window.Telegram.WebApp) {
             const tg = window.Telegram.WebApp;
-            if (tg.BackButton.isVisible) {
-                tg.BackButton.offClick();
-            }
-
+            tg.BackButton.offClick();
             const isGameScreen = ['upgrade-view', 'miner-view', 'coinflip-view', 'rps-view', 'slots-view', 'tower-view'].includes(viewId);
-            const isMenuScreen = ['games-menu-view', 'contests-view', 'friends-view', 'profile-view'].includes(viewId);
-
+            
             if (isGameScreen) {
                 tg.BackButton.show();
                 tg.BackButton.onClick(() => switchView('games-menu-view'));
-            } else if (isMenuScreen && viewId !== 'game-view') {
+            } else if (viewId !== 'game-view') {
                  tg.BackButton.show();
                  tg.BackButton.onClick(() => switchView('game-view'));
-            }
-            else {
+            } else {
                 tg.BackButton.hide();
             }
         }
-
+        
         if (viewId === 'profile-view') {
-            renderInventory();
+            loadUserInventory();
             renderHistory();
         }
-        if (viewId === 'upgrade-view') {
-            resetUpgradeState(true);
-        }
-        if (viewId === 'contests-view') {
-            updateContestUI();
-        }
-        if (viewId === 'miner-view') {
-            resetMinerGame();
-        }
-        if(viewId === 'tower-view') {
-            resetTowerGame();
-        }
+        if (viewId === 'upgrade-view') resetUpgradeState(true);
+        if (viewId === 'contests-view') updateContestUI();
+        if (viewId === 'miner-view') resetMinerGame();
+        if(viewId === 'tower-view') resetTowerGame();
     }
 
     function renderInventory() {
@@ -266,15 +254,32 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    function sellFromInventory(uniqueId) {
-        const itemIndex = STATE.inventory.findIndex(item => item.uniqueId === uniqueId);
-        if (itemIndex === -1) return;
-        const item = STATE.inventory[itemIndex];
-        STATE.userBalance += item.value;
-        updateBalanceDisplay();
-        STATE.inventory.splice(itemIndex, 1);
-        renderInventory();
+    async function sellFromInventory(uniqueId) {
+        if (!STATE.user || !STATE.user.id) {
+            showNotification("Ошибка: пользователь не определен.");
+            return;
+        }
+        try {
+            const response = await fetch('/api/user/inventory/sell', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: STATE.user.id, unique_id: uniqueId })
+            });
+            const result = await response.json();
+            if (result.success) {
+                STATE.userBalance = result.newBalance;
+                updateBalanceDisplay();
+                await loadUserInventory(); // Reload inventory from server
+                showNotification("Предмет успешно продан!");
+            } else {
+                throw new Error(result.error || "Неизвестная ошибка при продаже");
+            }
+        } catch (error) {
+            console.error("Ошибка при продаже предмета:", error);
+            showNotification(`Ошибка: ${error.message}`);
+        }
     }
+
 
     function renderHistory() {
         if (!UI.historyContent) return;
@@ -307,14 +312,14 @@ document.addEventListener('DOMContentLoaded', function() {
     function updatePriceMessage() {
         if (!UI.priceCheckMessage) return;
         const totalCost = STATE.casePrice * STATE.openQuantity;
-        if (STATE.userBalance >= totalCost) {
-            UI.priceCheckMessage.innerHTML = `⭐ ${totalCost.toLocaleString('ru-RU')}`;
-            UI.priceCheckMessage.classList.remove('error');
-            UI.startSpinBtn.disabled = false;
-        } else {
-            UI.priceCheckMessage.innerHTML = `⭐ ${totalCost.toLocaleString('ru-RU')} (не хватает ${(totalCost - STATE.userBalance).toLocaleString('ru-RU')})`;
+        UI.priceCheckMessage.innerHTML = `⭐ ${totalCost.toLocaleString('ru-RU')}`;
+        if (STATE.userBalance < totalCost) {
+            UI.priceCheckMessage.innerHTML += ` (не хватает ${(totalCost - STATE.userBalance).toLocaleString('ru-RU')})`;
             UI.priceCheckMessage.classList.add('error');
             UI.startSpinBtn.disabled = true;
+        } else {
+            UI.priceCheckMessage.classList.remove('error');
+            UI.startSpinBtn.disabled = false;
         }
     }
 
@@ -328,12 +333,9 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function startSpinProcess() {
-        if (STATE.isSpinning) return;
-        if (STATE.possibleItems.length === 0) {
-            showNotification("Ошибка: содержимое кейса не загружено. Попробуйте перезагрузить страницу.");
-            return;
-        }
+    async function startSpinProcess() {
+        if (STATE.isSpinning || !STATE.user) return;
+        
         const totalCost = STATE.casePrice * STATE.openQuantity;
         if (STATE.userBalance < totalCost) {
             showNotification("Недостаточно средств.");
@@ -341,56 +343,52 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         STATE.isSpinning = true;
-        STATE.userBalance -= totalCost;
-        updateBalanceDisplay();
         hideModal(UI.preOpenModal);
 
-        const wonItems = [];
-        for (let i = 0; i < STATE.openQuantity; i++) {
-            const winnerData = { ...STATE.possibleItems[Math.floor(Math.random() * STATE.possibleItems.length)], uniqueId: Date.now() + i };
-            wonItems.push(winnerData);
-        }
+        try {
+            const response = await fetch('/api/case/open', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: STATE.user.id, quantity: STATE.openQuantity })
+            });
+            const result = await response.json();
+            if (!result.success) throw new Error(result.error || 'Ошибка при открытии кейса');
+            
+            STATE.userBalance = result.newBalance;
+            updateBalanceDisplay();
+            STATE.lastWonItems = result.wonItems;
+            STATE.gameHistory.push(...STATE.lastWonItems.map(item => ({ ...item, date: new Date(), name: `Выигрыш из кейса` })));
 
-        STATE.lastWonItems = wonItems;
-        STATE.inventory.push(...wonItems);
-        STATE.gameHistory.push(...wonItems.map(item => ({ ...item, date: new Date(), name: `Выигрыш из кейса` })));
+            UI.caseView.classList.add('hidden');
+            UI.spinView.classList.remove('hidden');
 
-
-        UI.caseView.classList.add('hidden');
-        UI.spinView.classList.remove('hidden');
-
-        if (STATE.openQuantity > 1) {
-            startMultiVerticalAnimation();
-        } else {
-            startHorizontalAnimation();
+            if (STATE.openQuantity > 1) {
+                startMultiVerticalAnimation();
+            } else {
+                startHorizontalAnimation();
+            }
+        } catch(error) {
+            console.error("Ошибка при открытии кейса:", error);
+            showNotification(error.message);
+            STATE.isSpinning = false;
         }
     }
+
 
     function startHorizontalAnimation() {
         UI.spinnerContainer.classList.remove('hidden');
         UI.multiSpinnerContainer.classList.add('hidden');
 
         const winnerItem = STATE.lastWonItems[0];
-        const reelLength = 60, winnerIndex = 50;
-        const reel = Array.from({ length: reelLength }, (_, i) => i === winnerIndex ? winnerItem : STATE.possibleItems[Math.floor(Math.random() * STATE.possibleItems.length)]);
+        const reel = Array.from({ length: 60 }, (_, i) => i === 50 ? winnerItem : STATE.possibleItems[Math.floor(Math.random() * STATE.possibleItems.length)]);
 
-        UI.rouletteTrack.innerHTML = '';
-        reel.forEach(item => {
-            const itemEl = document.createElement('div');
-            itemEl.classList.add('roulette-item');
-            itemEl.innerHTML = `<img src="${item.imageSrc}" alt="${item.name}">`;
-            UI.rouletteTrack.appendChild(itemEl);
-        });
-
-        const itemWidth = 120, itemMargin = 5, totalItemWidth = itemWidth + (itemMargin * 2);
-        const targetPosition = (winnerIndex * totalItemWidth) + (totalItemWidth / 2);
-
-        const animationDuration = STATE.isFastSpinEnabled ? '0.2s' : '6s';
-
+        UI.rouletteTrack.innerHTML = reel.map(item => `<div class="roulette-item"><img src="${item.imageSrc}" alt="${item.name}"></div>`).join('');
+        
+        const targetPosition = (50 * 130) + (130 / 2);
         UI.rouletteTrack.style.transition = 'none';
         UI.rouletteTrack.style.left = '0px';
         UI.rouletteTrack.getBoundingClientRect();
-        UI.rouletteTrack.style.transition = `left ${animationDuration} cubic-bezier(0.2, 0.8, 0.2, 1)`;
+        UI.rouletteTrack.style.transition = `left ${STATE.isFastSpinEnabled ? '0.2s' : '6s'} cubic-bezier(0.2, 0.8, 0.2, 1)`;
         UI.rouletteTrack.style.left = `calc(50% - ${targetPosition}px)`;
 
         UI.rouletteTrack.addEventListener('transitionend', showResult, { once: true });
@@ -400,36 +398,25 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.spinnerContainer.classList.add('hidden');
         UI.multiSpinnerContainer.classList.remove('hidden');
         UI.multiSpinnerContainer.innerHTML = '';
-
         let animationsFinished = 0;
-        const animationDuration = STATE.isFastSpinEnabled ? 0.2 : 5;
 
         STATE.lastWonItems.forEach((winnerItem) => {
-            const spinnerColumn = document.createElement('div');
-            spinnerColumn.classList.add('vertical-spinner');
             const track = document.createElement('div');
-            track.classList.add('vertical-roulette-track');
-
-            const reelLength = 60, winnerIndex = 50;
-            const reel = Array.from({ length: reelLength }, (_, i) => i === winnerIndex ? winnerItem : STATE.possibleItems[Math.floor(Math.random() * STATE.possibleItems.length)]);
-
-            reel.forEach(item => {
-                const itemEl = document.createElement('div');
-                itemEl.classList.add('vertical-roulette-item');
-                itemEl.innerHTML = `<img src="${item.imageSrc}" alt="${item.name}">`;
-                track.appendChild(itemEl);
-            });
-
+            track.className = 'vertical-roulette-track';
+            const reel = Array.from({ length: 60 }, (_, i) => i === 50 ? winnerItem : STATE.possibleItems[Math.floor(Math.random() * STATE.possibleItems.length)]);
+            track.innerHTML = reel.map(item => `<div class="vertical-roulette-item"><img src="${item.imageSrc}" alt="${item.name}"></div>`).join('');
+            
+            const spinnerColumn = document.createElement('div');
+            spinnerColumn.className = 'vertical-spinner';
             spinnerColumn.appendChild(track);
             UI.multiSpinnerContainer.appendChild(spinnerColumn);
 
-            const itemHeight = 100, itemMargin = 5, totalItemHeight = itemHeight + (itemMargin * 2);
-            const targetPosition = (winnerIndex * totalItemHeight) + (totalItemHeight / 2);
-
+            const targetPosition = (50 * 110) + (110 / 2);
             track.style.transition = 'none';
             track.style.top = '0px';
             track.getBoundingClientRect();
-            track.style.transition = `top ${animationDuration + Math.random() * (STATE.isFastSpinEnabled ? 0.1 : 2)}s cubic-bezier(0.2, 0.8, 0.2, 1)`;
+            const duration = (STATE.isFastSpinEnabled ? 0.2 : 5) + Math.random() * (STATE.isFastSpinEnabled ? 0.1 : 2);
+            track.style.transition = `top ${duration}s cubic-bezier(0.2, 0.8, 0.2, 1)`;
             track.style.top = `calc(50% - ${targetPosition}px)`;
 
             track.addEventListener('transitionend', () => {
@@ -440,53 +427,48 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function showResult() {
-        UI.resultModal.innerHTML = '';
-        const totalValue = STATE.lastWonItems.reduce((sum, item) => sum + item.value, 0);
         const modalContent = document.createElement('div');
-        modalContent.classList.add('modal-content');
+        modalContent.className = 'modal-content';
         modalContent.innerHTML = `
             <button class="close-btn">✖</button>
             <h2 class="modal-case-title">Ваш выигрыш:</h2>
-            <div class="result-items-container"></div>
+            <div class="result-items-container">
+                ${STATE.lastWonItems.map(item => `
+                    <div class="inventory-item">
+                        <img src="${item.imageSrc}" alt="${item.name}">
+                        <div class="inventory-item-name">${item.name}</div>
+                        <div class="inventory-item-price">⭐ ${item.value.toLocaleString('ru-RU')}</div>
+                    </div>`).join('')}
+            </div>
             <div class="result-buttons">
-                <button class="secondary-button" id="result-sell-btn">Продать все за ⭐ ${totalValue.toLocaleString('ru-RU')}</button>
+                <button class="secondary-button" id="result-inventory-btn">В инвентарь</button>
                 <button class="primary-button" id="result-spin-again-btn">Крутить еще</button>
             </div>
         `;
-        const itemsContainer = modalContent.querySelector('.result-items-container');
-        STATE.lastWonItems.forEach(item => {
-            const itemEl = document.createElement('div');
-            itemEl.classList.add('inventory-item');
-            itemEl.innerHTML = `
-                <img src="${item.imageSrc}" alt="${item.name}">
-                <div class="inventory-item-name">${item.name}</div>
-                <div class="inventory-item-price">⭐ ${item.value.toLocaleString('ru-RU')}</div>
-            `;
-            itemsContainer.appendChild(itemEl);
-        });
+        UI.resultModal.innerHTML = '';
         UI.resultModal.appendChild(modalContent);
-
-        const closeBtn = modalContent.querySelector('.close-btn'), sellBtn = modalContent.querySelector('#result-sell-btn'), spinAgainBtn = modalContent.querySelector('#result-spin-again-btn');
+        
         const finalizeAction = () => {
             hideModal(UI.resultModal);
             UI.spinView.classList.add('hidden');
             UI.caseView.classList.remove('hidden');
             STATE.isSpinning = false;
+            loadUserInventory(); // Refresh inventory
         };
-        closeBtn.addEventListener('click', finalizeAction);
-        spinAgainBtn.addEventListener('click', () => {
+
+        modalContent.querySelector('.close-btn').addEventListener('click', finalizeAction);
+        modalContent.querySelector('#result-spin-again-btn').addEventListener('click', () => {
             finalizeAction();
             setTimeout(handleCaseClick, 100);
         });
-        sellBtn.addEventListener('click', () => {
-            STATE.userBalance += totalValue;
-            updateBalanceDisplay();
-            const idsToRemove = new Set(STATE.lastWonItems.map(item => item.uniqueId));
-            STATE.inventory = STATE.inventory.filter(invItem => !idsToRemove.has(invItem.uniqueId));
+        modalContent.querySelector('#result-inventory-btn').addEventListener('click', () => {
             finalizeAction();
+            switchView('profile-view');
         });
+        
         showModal(UI.resultModal);
     }
+
 
     function populateCasePreview() {
         if (!UI.caseContentsPreview) return;
@@ -514,7 +496,6 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // Восстанавливаем структуру карточки, если она была очищена
         if (!document.getElementById('contest-item-image')) {
             UI.contestCard.innerHTML = `
                 <div class="contest-header">
@@ -544,13 +525,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     </div>
                 </div>`;
             
-            // Переназначаем события, т.к. мы пересоздали DOM
             document.getElementById('buy-ticket-btn').addEventListener('click', buyTickets);
             document.getElementById('ticket-quantity-plus').addEventListener('click', () => handleTicketQuantityChange(1));
             document.getElementById('ticket-quantity-minus').addEventListener('click', () => handleTicketQuantityChange(-1));
         }
 
-        // Обновляем динамические элементы
         document.getElementById('contest-item-image').src = contest.item_imageSrc;
         document.getElementById('contest-item-name').textContent = contest.item_name;
         document.getElementById('user-tickets-display').textContent = contest.userTickets || 0;
@@ -597,7 +576,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 showNotification(`Вы успешно приобрели ${STATE.ticketQuantity} билет(ов)!`);
                 STATE.userBalance = result.newBalance;
                 
-                // Обновляем локальные данные о конкурсе
                 if (STATE.contest) {
                     STATE.contest.userTickets = (STATE.contest.userTickets || 0) + STATE.ticketQuantity;
                     STATE.contest.count = (STATE.contest.count || 0) + STATE.ticketQuantity;
@@ -634,7 +612,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (timeLeft <= 0) {
             contestTimerEl.textContent = 'Конкурс завершен';
             clearInterval(timerInterval);
-            // Можно добавить логику для автоматического обновления данных о конкурсе
             setTimeout(loadInitialData, 5000); 
             return;
         }
@@ -1326,6 +1303,7 @@ document.addEventListener('DOMContentLoaded', function() {
             populateCasePreview();
             updateContestUI();
             setupTimer();
+            loadUserInventory();
 
         } catch (error) {
             console.error('Не удалось загрузить данные с сервера:', error);
@@ -1354,7 +1332,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- ИНИЦИАЛИЗАЦИЯ ---
     function init() {
-        // Поиск всех элементов DOM
         const selectors = {
             notificationToast: '#notification-toast', userBalanceElement: '#user-balance',
             views: '.view', navButtons: '.nav-btn', caseView: '#case-view', spinView: '#spin-view',
@@ -1394,16 +1371,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         for (const key in selectors) {
             const elements = document.querySelectorAll(selectors[key]);
-            if (elements.length > 1) {
-                UI[key] = elements;
-            } else if (elements.length === 1) {
-                UI[key] = elements[0];
-            } else {
-                UI[key] = null;
-            }
+            UI[key] = elements.length > 1 ? elements : elements[0];
         }
 
-        // Назначение обработчиков событий
         if (UI.caseImageBtn) UI.caseImageBtn.addEventListener('click', handleCaseClick);
         if (UI.startSpinBtn) UI.startSpinBtn.addEventListener('click', startSpinProcess);
         if (UI.quantitySelector) UI.quantitySelector.addEventListener('click', handleQuantityChange);
@@ -1416,12 +1386,12 @@ document.addEventListener('DOMContentLoaded', function() {
             UI.profileTabs.forEach(t => t.classList.remove('active'));
             UI.profileContents.forEach(c => c.classList.remove('active'));
             this.classList.add('active');
-            const contentEl = document.getElementById(this.dataset.tab + '-content');
-            if (contentEl) contentEl.classList.add('active');
+            document.getElementById(this.dataset.tab + '-content').classList.add('active');
         }));
         if (UI.modalOverlay) UI.modalOverlay.addEventListener('click', () => document.querySelectorAll('.modal.visible').forEach(hideModal));
         const preOpenModalCloseBtn = document.querySelector('[data-close-modal="pre-open-modal"]');
         if (preOpenModalCloseBtn) preOpenModalCloseBtn.addEventListener('click', () => hideModal(UI.preOpenModal));
+        
         if (UI.pickerTabs) UI.pickerTabs.forEach(tab => {
             tab.addEventListener('click', () => {
                 if (STATE.upgradeState.isUpgrading) return;
@@ -1446,7 +1416,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (UI.coinflipTailsBtn) UI.coinflipTailsBtn.addEventListener('click', () => handleCoinflip('tails'));
         if (UI.rpsButtons) UI.rpsButtons.forEach(button => button.addEventListener('click', () => handleRps(button.dataset.choice)));
 
-        // Начальное состояние приложения
         loadTelegramData();
         switchView('game-view');
     }
