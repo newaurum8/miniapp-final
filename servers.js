@@ -9,8 +9,14 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+
+// --- ВІДДАЧА СТАТИЧНИХ ФАЙЛІВ ---
+// Цей блок тепер знаходиться ДО захисту
+app.use(express.static(__dirname));
+app.use('/admin', express.static(path.join(__dirname, 'admin')));
+
+
 // --- ЗАХИСТ АДМІН-ПАНЕЛІ ---
-// 👇 ПОМИЛКА БУЛА ТУТ. Тепер вона виправлена.
 const ADMIN_SECRET = 'Aurum'; // <-- ЗАМІНІТЬ ЦЕ НА ВАШ ВЛАСНИЙ СЕКРЕТНИЙ КЛЮЧ
 
 const checkAdminSecret = (req, res, next) => {
@@ -22,20 +28,17 @@ const checkAdminSecret = (req, res, next) => {
     }
 };
 
-app.use('/admin', checkAdminSecret);
+// Захищаємо тільки API-маршрути адмінки
 app.use('/api/admin', checkAdminSecret);
-// --- КІНЕЦЬ БЛОКУ ЗАХИСТУ ---
 
 
-// --- ВІДДАЧА СТАТИЧНИХ ФАЙЛІВ ---
-app.use(express.static(__dirname));
-app.use('/admin', express.static(path.join(__dirname, 'admin')));
-
+// --- ОСНОВНІ МАРШРУТИ ---
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-app.get('/admin', (req, res) => {
+// Захищаємо HTML-сторінку адмінки напряму
+app.get('/admin', checkAdminSecret, (req, res) => {
     res.sendFile(path.join(__dirname, 'admin', 'index.html'));
 });
 
@@ -110,8 +113,7 @@ function initializeDb() {
     });
 }
 
-// --- API Маршрути ---
-
+// --- API Маршрути (клієнтські) ---
 app.post('/api/user/get-or-create', (req, res) => {
     const { telegram_id, username } = req.body;
     if (!telegram_id) {
@@ -134,6 +136,34 @@ app.post('/api/user/get-or-create', (req, res) => {
     });
 });
 
+app.get('/api/admin/case/items_full', (req, res) => {
+    const sql = `SELECT i.id, i.name, i.imageSrc, i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1`;
+    db.all(sql, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (rows.length > 0) {
+            res.json(rows);
+        } else {
+            db.all("SELECT * FROM items ORDER BY value DESC", [], (err, allItems) => {
+                if (err) return res.status(500).json({ error: err.message });
+                res.json(allItems);
+            });
+        }
+    });
+});
+
+app.get('/api/game_settings', (req, res) => {
+    db.all("SELECT key, value FROM game_settings", [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        const settings = rows.reduce((acc, row) => {
+            acc[row.key] = row.value;
+            return acc;
+        }, {});
+        res.json(settings);
+    });
+});
+
+
+// --- API Маршрути (адмінські) ---
 app.get('/api/admin/users', (req, res) => {
     db.all("SELECT id, telegram_id, username, balance FROM users ORDER BY id DESC", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -198,32 +228,6 @@ app.post('/api/admin/case/items', (req, res) => {
                 res.json({ success: true });
             });
         }
-    });
-});
-
-app.get('/api/admin/case/items_full', (req, res) => {
-    const sql = `SELECT i.id, i.name, i.imageSrc, i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1`;
-    db.all(sql, [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (rows.length > 0) {
-            res.json(rows);
-        } else {
-            db.all("SELECT * FROM items ORDER BY value DESC", [], (err, allItems) => {
-                if (err) return res.status(500).json({ error: err.message });
-                res.json(allItems);
-            });
-        }
-    });
-});
-
-app.get('/api/game_settings', (req, res) => {
-    db.all("SELECT key, value FROM game_settings", [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        const settings = rows.reduce((acc, row) => {
-            acc[row.key] = row.value;
-            return acc;
-        }, {});
-        res.json(settings);
     });
 });
 
