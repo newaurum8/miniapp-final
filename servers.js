@@ -130,6 +130,15 @@ function initializeDb() {
             FOREIGN KEY (contest_id) REFERENCES contests(id),
             FOREIGN KEY (user_id) REFERENCES users(id)
         )`);
+
+        // --- ТАБЛИЦА ДЛЯ ИНВЕНТАРЯ ---
+        db.run(`CREATE TABLE IF NOT EXISTS user_inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            item_id INTEGER NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+        )`);
     });
 }
 
@@ -401,22 +410,18 @@ app.post('/api/admin/contest/draw/:id', (req, res) => {
 
             const winner = participants[Math.floor(Math.random() * participants.length)];
             
-            db.get("SELECT value FROM items WHERE id = ?", [contest.item_id], (err, item) => {
-                 if(err) { 
-                     console.error("Ошибка получения стоимости предмета:", err);
-                     return res.status(500).json({ error: "Ошибка получения стоимости предмета" });
-                 }
-                 
-                 db.run("UPDATE users SET balance = balance + ? WHERE id = ?", [item.value, winner.user_id], function(err) {
-                    if (err) {
-                         console.error("Ошибка начисления приза:", err);
-                         return res.status(500).json({ error: "Ошибка начисления приза" });
-                    }
-                    db.run("UPDATE contests SET is_active = FALSE, winner_id = ? WHERE id = ?", [winner.user_id, contestId], (err) => {
-                        if (err) return res.status(500).json({ error: err.message });
-                        res.json({ success: true, winner_telegram_id: winner.telegram_id });
-                    });
-                 });
+            // Добавляем предмет в инвентарь победителя
+            db.run("INSERT INTO user_inventory (user_id, item_id) VALUES (?, ?)", [winner.user_id, contest.item_id], function(err) {
+                if (err) {
+                    console.error("Ошибка добавления предмета в инвентарь:", err);
+                    return res.status(500).json({ error: "Ошибка добавления предмета в инвентарь" });
+                }
+
+                // Завершаем конкурс
+                db.run("UPDATE contests SET is_active = FALSE, winner_id = ? WHERE id = ?", [winner.user_id, contestId], (err) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    res.json({ success: true, winner_telegram_id: winner.telegram_id, message: "Приз зачислен в инвентарь победителя." });
+                });
             });
         });
     });
