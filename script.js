@@ -212,40 +212,68 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function switchView(viewId) {
-        UI.views.forEach(view => view.classList.remove('active'));
+        UI.views.forEach(view => {
+            view.classList.remove('active');
+        });
         UI.navButtons.forEach(btn => btn.classList.remove('active'));
-
+    
         const viewToShow = document.getElementById(viewId);
-        const btnToActivate = document.querySelector(`.nav-btn[data-view="${viewId}"]`) ||
-            document.querySelector('.nav-btn[data-view="games-menu-view"]');
-
-        if (viewToShow) viewToShow.classList.add('active');
-        if (btnToActivate) btnToActivate.classList.add('active');
-
+        let btnToActivate;
+    
+        if (viewToShow) {
+            viewToShow.classList.add('active');
+            // Если это один из экранов игр, активируем кнопку "Игры"
+            if (['upgrade-view', 'miner-view', 'coinflip-view', 'rps-view', 'slots-view', 'tower-view'].includes(viewId)) {
+                btnToActivate = document.querySelector('.nav-btn[data-view="games-menu-view"]');
+            } else {
+                btnToActivate = document.querySelector(`.nav-btn[data-view="${viewId}"]`);
+            }
+        } else {
+            // Фоллбэк на главный экран, если view не найдена
+            document.getElementById('game-view').classList.add('active');
+            btnToActivate = document.querySelector('.nav-btn[data-view="game-view"]');
+        }
+    
+        if (btnToActivate) {
+            btnToActivate.classList.add('active');
+        }
+    
+        // Управление кнопкой "Назад" в Telegram
         if (window.Telegram && window.Telegram.WebApp) {
             const tg = window.Telegram.WebApp;
-            tg.BackButton.offClick();
+            tg.BackButton.offClick(); // Сбрасываем старый обработчик
+    
             const isGameScreen = ['upgrade-view', 'miner-view', 'coinflip-view', 'rps-view', 'slots-view', 'tower-view'].includes(viewId);
-
+            const isMainMenuScreen = ['games-menu-view', 'contests-view', 'friends-view', 'profile-view'].includes(viewId);
+            
             if (isGameScreen) {
                 tg.BackButton.show();
                 tg.BackButton.onClick(() => switchView('games-menu-view'));
-            } else if (viewId !== 'game-view') {
-                tg.BackButton.show();
-                tg.BackButton.onClick(() => switchView('game-view'));
+            } else if (isMainMenuScreen) {
+                 tg.BackButton.show();
+                 tg.BackButton.onClick(() => switchView('game-view'));
             } else {
                 tg.BackButton.hide();
             }
         }
-
+    
+        // Действия при переключении на определенные экраны
         if (viewId === 'profile-view') {
             loadUserInventory();
             renderHistory();
         }
-        if (viewId === 'upgrade-view') resetUpgradeState(true);
-        if (viewId === 'contests-view') updateContestUI();
-        if (viewId === 'miner-view') resetMinerGame();
-        if (viewId === 'tower-view') resetTowerGame();
+        if (viewId === 'upgrade-view') {
+            resetUpgradeState(true);
+        }
+        if (viewId === 'contests-view') {
+            updateContestUI();
+        }
+        if (viewId === 'miner-view') {
+            resetMinerGame();
+        }
+        if (viewId === 'tower-view') {
+            resetTowerGame();
+        }
     }
 
     function renderInventory() {
@@ -1507,7 +1535,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         for (const key in selectors) {
             const elements = document.querySelectorAll(selectors[key]);
-            UI[key] = elements.length > 1 ? elements : elements[0];
+            UI[key] = elements.length > 1 ? Array.from(elements) : elements[0];
         }
 
         if (UI.caseImageBtn) UI.caseImageBtn.addEventListener('click', handleCaseClick);
@@ -1519,11 +1547,18 @@ document.addEventListener('DOMContentLoaded', function() {
         if (UI.copyLinkBtn) UI.copyLinkBtn.addEventListener('click', copyInviteLink);
 
         if (UI.profileTabs) UI.profileTabs.forEach(tab => tab.addEventListener('click', function() {
-            UI.profileTabs.forEach(t => t.classList.remove('active'));
-            UI.profileContents.forEach(c => c.classList.remove('active'));
+            const parentTabs = this.closest('.profile-tabs');
+            parentTabs.querySelectorAll('.profile-tab-btn').forEach(t => t.classList.remove('active'));
             this.classList.add('active');
-            document.getElementById(this.dataset.tab + '-content').classList.add('active');
+            const contentId = this.dataset.tab + '-content';
+            const parentContent = parentTabs.nextElementSibling;
+            if(parentContent && parentContent.classList.contains('profile-content')){
+                parentContent.querySelectorAll('.profile-tab-content').forEach(c => c.classList.remove('active'));
+                const contentEl = parentContent.querySelector('#' + contentId);
+                if (contentEl) contentEl.classList.add('active');
+            }
         }));
+
         if (UI.modalOverlay) UI.modalOverlay.addEventListener('click', () => document.querySelectorAll('.modal.visible').forEach(hideModal));
         const preOpenModalCloseBtn = document.querySelector('[data-close-modal="pre-open-modal"]');
         if (preOpenModalCloseBtn) preOpenModalCloseBtn.addEventListener('click', () => hideModal(UI.preOpenModal));
