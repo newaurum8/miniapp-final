@@ -9,26 +9,25 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-
 // --- ВІДДАЧА СТАТИЧНИХ ФАЙЛІВ ---
-// Цей блок тепер знаходиться ДО захисту
+// Цей блок має бути до захисту, щоб CSS та JS адмінки завантажувалися
 app.use(express.static(__dirname));
 app.use('/admin', express.static(path.join(__dirname, 'admin')));
 
 
 // --- ЗАХИСТ АДМІН-ПАНЕЛІ ---
-const ADMIN_SECRET = 'Aurum'; // <-- ЗАМІНІТЬ ЦЕ НА ВАШ ВЛАСНИЙ СЕКРЕТНИЙ КЛЮЧ
+const ADMIN_SECRET = 'Aurum'; // <-- ЗАМІНІТЬ ЦЕ НА ВАШ ВЛАСНИЙ УНІКАЛЬНИЙ КЛЮЧ
 
 const checkAdminSecret = (req, res, next) => {
     const { secret } = req.query;
     if (secret === ADMIN_SECRET) {
-        next();
+        next(); // Ключ вірний, продовжуємо
     } else {
-        res.status(403).send('Доступ заборонено');
+        res.status(403).send('Доступ заборонено'); // Ключ невірний, блокуємо
     }
 };
 
-// Захищаємо тільки API-маршрути адмінки
+// Застосовуємо захист тільки до API-маршрутів адмінки
 app.use('/api/admin', checkAdminSecret);
 
 
@@ -43,7 +42,7 @@ app.get('/admin', checkAdminSecret, (req, res) => {
 });
 
 
-// Підключення до БД
+// Підключення до БД (з урахуванням Render Disk)
 const dataDir = process.env.RENDER_DISK_MOUNT_PATH || __dirname;
 const dbPath = path.join(dataDir, 'database.sqlite');
 const db = new sqlite3.Database(dbPath, (err) => {
@@ -113,7 +112,7 @@ function initializeDb() {
     });
 }
 
-// --- API Маршрути (клієнтські) ---
+// --- API Маршрути (клієнтські - без захисту) ---
 app.post('/api/user/get-or-create', (req, res) => {
     const { telegram_id, username } = req.body;
     if (!telegram_id) {
@@ -136,18 +135,11 @@ app.post('/api/user/get-or-create', (req, res) => {
     });
 });
 
-app.get('/api/admin/case/items_full', (req, res) => {
+app.get('/api/case/items', (req, res) => {
     const sql = `SELECT i.id, i.name, i.imageSrc, i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1`;
     db.all(sql, [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
-        if (rows.length > 0) {
-            res.json(rows);
-        } else {
-            db.all("SELECT * FROM items ORDER BY value DESC", [], (err, allItems) => {
-                if (err) return res.status(500).json({ error: err.message });
-                res.json(allItems);
-            });
-        }
+        res.json(rows || []);
     });
 });
 
@@ -163,7 +155,7 @@ app.get('/api/game_settings', (req, res) => {
 });
 
 
-// --- API Маршрути (адмінські) ---
+// --- API Маршрути (адмінські - захищені) ---
 app.get('/api/admin/users', (req, res) => {
     db.all("SELECT id, telegram_id, username, balance FROM users ORDER BY id DESC", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
