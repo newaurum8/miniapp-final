@@ -10,40 +10,33 @@ app.use(cors());
 app.use(express.json());
 
 // --- ОТДАЧА СТАТИЧЕСКИХ ФАЙЛОВ ---
-// Этот блок должен быть до защиты, чтобы CSS и JS админки загружались
 app.use(express.static(__dirname));
 app.use('/admin', express.static(path.join(__dirname, 'admin')));
-
 
 // --- ЗАЩИТА АДМИН-ПАНЕЛИ ---
 const ADMIN_SECRET = 'Aurum'; // <-- ЗАМЕНИТЕ ЭТО НА ВАШ СОБСТВЕННЫЙ УНИКАЛЬНЫЙ КЛЮЧ
 
 const checkAdminSecret = (req, res, next) => {
-    // Ключ может передаваться как в query (?secret=KEY), так и в теле запроса
     const secret = req.query.secret || req.body.secret;
     if (secret === ADMIN_SECRET) {
-        next(); // Ключ верный, продолжаем
+        next();
     } else {
-        res.status(403).send('Доступ запрещен'); // Ключ неверный, блокируем
+        res.status(403).send('Доступ запрещен');
     }
 };
 
-// Применяем защиту только к API-маршрутам админки
 app.use('/api/admin', checkAdminSecret);
-
 
 // --- ОСНОВНЫЕ МАРШРУТЫ ---
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
 
-// Защищаем HTML-страницу админки напрямую
 app.get('/admin', checkAdminSecret, (req, res) => {
     res.sendFile(path.join(__dirname, 'admin', 'index.html'));
 });
 
-
-// Подключение к БД (с учетом Render Disk)
+// Подключение к БД
 const dataDir = process.env.RENDER_DISK_MOUNT_PATH || __dirname;
 const dbPath = path.join(dataDir, 'database.sqlite');
 const db = new sqlite3.Database(dbPath, (err) => {
@@ -85,6 +78,14 @@ function initializeDb() {
             }
         });
 
+        db.run(`CREATE TABLE IF NOT EXISTS user_inventory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            item_id INTEGER NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
+        )`);
+
         db.run(`CREATE TABLE IF NOT EXISTS case_items (
             case_id INTEGER,
             item_id INTEGER,
@@ -111,7 +112,6 @@ function initializeDb() {
             }
         });
 
-        // --- ТАБЛИЦЫ ДЛЯ КОНКУРСА ---
         db.run(`CREATE TABLE IF NOT EXISTS contests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             item_id INTEGER NOT NULL,
@@ -130,19 +130,11 @@ function initializeDb() {
             FOREIGN KEY (contest_id) REFERENCES contests(id),
             FOREIGN KEY (user_id) REFERENCES users(id)
         )`);
-
-        // --- ТАБЛИЦА ДЛЯ ИНВЕНТАРЯ ---
-        db.run(`CREATE TABLE IF NOT EXISTS user_inventory (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            item_id INTEGER NOT NULL,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-            FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
-        )`);
     });
 }
 
-// --- API Маршруты (клиентские - без защиты) ---
+// --- API Маршруты (клиентские) ---
+
 app.post('/api/user/get-or-create', (req, res) => {
     const { telegram_id, username } = req.body;
     if (!telegram_id) {
@@ -165,6 +157,62 @@ app.post('/api/user/get-or-create', (req, res) => {
     });
 });
 
+app.get('/api/user/inventory', (req, res) => {
+    const { user_id } = req.query;
+    if (!user_id) {
+        return res.status(400).json({ error: 'user_id является обязательным' });
+    }
+
+    const sql = `
+        SELECT ui.id AS uniqueId, i.id, i.name, i.imageSrc, i.value
+        FROM user_inventory ui
+        JOIN items i ON ui.item_id = i.id
+        WHERE ui.user_id = ?
+    `;
+    db.all(sql, [user_id], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        res.json(rows || []);
+    });
+});
+
+app.post('/api/user/inventory/sell', (req, res) => {
+    const { user_id, unique_id } = req.body;
+    if (!user_id || !unique_id) {
+        return res.status(400).json({ error: 'Неверные данные для продажи' });
+    }
+
+    db.get("SELECT i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.id = ? AND ui.user_id = ?", [unique_id, user_id], (err, item) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!item) return res.status(404).json({ error: 'Предмет не найден в инвентаре' });
+
+        const itemValue = item.value;
+
+        db.serialize(() => {
+            db.run("BEGIN TRANSACTION");
+            db.run("DELETE FROM user_inventory WHERE id = ?", [unique_id], function(err) {
+                if (err) {
+                    db.run("ROLLBACK");
+                    return res.status(500).json({ error: "Ошибка при удалении предмета" });
+                }
+            });
+            db.run("UPDATE users SET balance = balance + ? WHERE id = ?", [itemValue, user_id], function(err) {
+                if (err) {
+                    db.run("ROLLBACK");
+                    return res.status(500).json({ error: "Ошибка при начислении баланса" });
+                }
+            });
+            db.run("COMMIT", (commitErr) => {
+                if (commitErr) return res.status(500).json({ "error": `Commit error: ${commitErr.message}` });
+                db.get("SELECT balance FROM users WHERE id = ?", [user_id], (err, user) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    res.json({ success: true, newBalance: user.balance });
+                });
+            });
+        });
+    });
+});
+
+
 app.get('/api/case/items', (req, res) => {
     const sql = `SELECT i.id, i.name, i.imageSrc, i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1`;
     db.all(sql, [], (err, rows) => {
@@ -173,18 +221,61 @@ app.get('/api/case/items', (req, res) => {
     });
 });
 
+app.post('/api/case/open', (req, res) => {
+    const { user_id, quantity } = req.body;
+    const casePrice = 100; 
+    const totalCost = casePrice * (quantity || 1);
+
+    if (!user_id || !quantity || quantity < 1) {
+        return res.status(400).json({ error: 'Неверные данные для открытия кейса' });
+    }
+
+    Promise.all([
+        new Promise((resolve, reject) => {
+            db.get("SELECT id, balance FROM users WHERE id = ?", [user_id], (err, user) => err ? reject(err) : resolve(user));
+        }),
+        new Promise((resolve, reject) => {
+            const sql = `SELECT i.id, i.name, i.imageSrc, i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1`;
+            db.all(sql, [], (err, items) => err ? reject(err) : resolve(items));
+        })
+    ]).then(([user, caseItems]) => {
+        if (!user) return res.status(404).json({ error: 'Пользователь не найден' });
+        if (user.balance < totalCost) return res.status(400).json({ error: 'Недостаточно средств' });
+        if (caseItems.length === 0) return res.status(500).json({ error: 'Кейс пуст' });
+
+        const newBalance = user.balance - totalCost;
+        const wonItems = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
+
+        db.serialize(() => {
+            db.run("BEGIN TRANSACTION");
+            db.run("UPDATE users SET balance = ? WHERE id = ?", [newBalance, user.id]);
+            const stmt = db.prepare("INSERT INTO user_inventory (user_id, item_id) VALUES (?, ?)");
+            wonItems.forEach(item => stmt.run(user.id, item.id));
+
+            stmt.finalize(err => {
+                if (err) {
+                    db.run("ROLLBACK");
+                    return res.status(500).json({ error: "Ошибка при добавлении предметов" });
+                }
+                db.run("COMMIT", (commitErr) => {
+                    if (commitErr) return res.status(500).json({ "error": `Commit error: ${commitErr.message}` });
+                    res.json({ success: true, newBalance, wonItems });
+                });
+            });
+        });
+
+    }).catch(err => res.status(500).json({ error: err.message }));
+});
+
+
 app.get('/api/game_settings', (req, res) => {
     db.all("SELECT key, value FROM game_settings", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
-        const settings = rows.reduce((acc, row) => {
-            acc[row.key] = row.value;
-            return acc;
-        }, {});
+        const settings = rows.reduce((acc, row) => ({...acc, [row.key]: row.value }), {});
         res.json(settings);
     });
 });
 
-// (Клиент) Получение актуального конкурса
 app.get('/api/contest/current', (req, res) => {
     const now = Date.now();
     const sql = `
@@ -200,22 +291,15 @@ app.get('/api/contest/current', (req, res) => {
 
         try {
             const ticketCount = await new Promise((resolve, reject) => {
-                db.get("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = ?", [contest.id], (err, row) => {
-                    if (err) reject(err);
-                    else resolve(row);
-                });
+                db.get("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = ?", [contest.id], (err, row) => err ? reject(err) : resolve(row));
             });
 
             const { telegram_id } = req.query;
             let userTickets = 0;
             if (telegram_id) {
-                const userTicketCount = await new Promise((resolve, reject) => {
-                    db.get("SELECT COUNT(*) AS count FROM user_tickets WHERE contest_id = ? AND telegram_id = ?", [contest.id, telegram_id], (err, row) => {
-                        if (err) reject(err);
-                        else resolve(row.count);
-                    });
+                userTickets = await new Promise((resolve, reject) => {
+                    db.get("SELECT COUNT(*) AS count FROM user_tickets WHERE contest_id = ? AND telegram_id = ?", [contest.id, telegram_id], (err, row) => err ? reject(err) : resolve(row.count));
                 });
-                userTickets = userTicketCount;
             }
 
             res.json({ ...contest, ...ticketCount, userTickets });
@@ -225,8 +309,6 @@ app.get('/api/contest/current', (req, res) => {
     });
 });
 
-
-// (Клиент) Покупка билета
 app.post('/api/contest/buy-ticket', (req, res) => {
     const { contest_id, telegram_id, quantity } = req.body;
     if (!contest_id || !telegram_id || !quantity || quantity < 1) {
@@ -271,7 +353,9 @@ app.post('/api/contest/buy-ticket', (req, res) => {
     });
 });
 
-// --- API Маршруты (админские - защищенные) ---
+
+// --- API Маршруты (админские) ---
+
 app.get('/api/admin/users', (req, res) => {
     db.all("SELECT id, telegram_id, username, balance FROM users ORDER BY id DESC", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
@@ -307,35 +391,16 @@ app.post('/api/admin/case/items', (req, res) => {
     const caseId = 1;
     db.serialize(() => {
         db.run("BEGIN TRANSACTION");
-        db.run(`DELETE FROM case_items WHERE case_id = ?`, [caseId], (err) => {
-            if (err) {
-                db.run("ROLLBACK");
-                return res.status(500).json({ "error": err.message });
-            }
-        });
+        db.run(`DELETE FROM case_items WHERE case_id = ?`, [caseId]);
         if (itemIds && itemIds.length > 0) {
             const stmt = db.prepare(`INSERT INTO case_items (case_id, item_id) VALUES (?, ?)`);
-            itemIds.forEach(itemId => {
-                stmt.run(caseId, itemId, (err) => {
-                    if (err) console.error("Error inserting item:", err);
-                });
-            });
-            stmt.finalize((err) => {
-                if (err) {
-                    db.run("ROLLBACK");
-                    return res.status(500).json({ "error": `Finalize error: ${err.message}` });
-                }
-                db.run("COMMIT", (commitErr) => {
-                    if (commitErr) return res.status(500).json({ "error": `Commit error: ${commitErr.message}` });
-                    res.json({ success: true });
-                });
-            });
-        } else {
-            db.run("COMMIT", (err) => {
-                if (err) return res.status(500).json({ "error": err.message });
-                res.json({ success: true });
-            });
+            itemIds.forEach(itemId => stmt.run(caseId, itemId));
+            stmt.finalize();
         }
+        db.run("COMMIT", (err) => {
+            if (err) return res.status(500).json({ "error": err.message });
+            res.json({ success: true });
+        });
     });
 });
 
@@ -347,56 +412,39 @@ app.post('/api/admin/game_settings', (req, res) => {
     db.serialize(() => {
         db.run("BEGIN TRANSACTION");
         const stmt = db.prepare("UPDATE game_settings SET value = ? WHERE key = ?");
-        for (const [key, value] of Object.entries(settings)) {
-            stmt.run(value.toString(), key);
-        }
-        stmt.finalize((err) => {
+        Object.entries(settings).forEach(([key, value]) => stmt.run(value.toString(), key));
+        stmt.finalize(err => {
             if (err) {
                 db.run("ROLLBACK");
                 return res.status(500).json({ error: `Finalize error: ${err.message}` });
             }
             db.run("COMMIT", (commitErr) => {
-                if (commitErr) {
-                    return res.status(500).json({ error: `Commit error: ${commitErr.message}` });
-                }
+                if (commitErr) return res.status(500).json({ error: `Commit error: ${commitErr.message}` });
                 res.json({ success: true });
             });
         });
     });
 });
 
-// (Админка) Создание нового конкурса
 app.post('/api/admin/contest/create', (req, res) => {
     const { item_id, ticket_price, duration_hours } = req.body;
     if (!item_id || !ticket_price || !duration_hours) {
         return res.status(400).json({ error: 'Все поля обязательны' });
     }
-
     const endTime = Date.now() + duration_hours * 60 * 60 * 1000;
-
     db.serialize(() => {
-        // Завершаем все активные конкурсы
-        db.run("UPDATE contests SET is_active = FALSE WHERE is_active = TRUE", (err) => {
-            if (err) {
-                return res.status(500).json({ error: err.message });
-            }
-            // Создаем новый конкурс
-            const stmt = db.prepare("INSERT INTO contests (item_id, ticket_price, end_time) VALUES (?, ?, ?)");
-            stmt.run(item_id, ticket_price, endTime, function(err) {
-                if (err) {
-                    return res.status(500).json({ error: err.message });
-                }
-                res.status(201).json({ success: true, contestId: this.lastID });
-            });
-            stmt.finalize();
+        db.run("UPDATE contests SET is_active = FALSE WHERE is_active = TRUE");
+        const stmt = db.prepare("INSERT INTO contests (item_id, ticket_price, end_time) VALUES (?, ?, ?)");
+        stmt.run(item_id, ticket_price, endTime, function(err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.status(201).json({ success: true, contestId: this.lastID });
         });
+        stmt.finalize();
     });
 });
 
-// (Админка) Розыгрыш приза
 app.post('/api/admin/contest/draw/:id', (req, res) => {
     const contestId = req.params.id;
-
     db.get("SELECT * FROM contests WHERE id = ? AND is_active = TRUE", [contestId], (err, contest) => {
         if (err) return res.status(500).json({ error: err.message });
         if (!contest) return res.status(404).json({ error: 'Активный конкурс не найден' });
@@ -410,14 +458,11 @@ app.post('/api/admin/contest/draw/:id', (req, res) => {
 
             const winner = participants[Math.floor(Math.random() * participants.length)];
             
-            // Добавляем предмет в инвентарь победителя
             db.run("INSERT INTO user_inventory (user_id, item_id) VALUES (?, ?)", [winner.user_id, contest.item_id], function(err) {
                 if (err) {
                     console.error("Ошибка добавления предмета в инвентарь:", err);
                     return res.status(500).json({ error: "Ошибка добавления предмета в инвентарь" });
                 }
-
-                // Завершаем конкурс
                 db.run("UPDATE contests SET is_active = FALSE, winner_id = ? WHERE id = ?", [winner.user_id, contestId], (err) => {
                     if (err) return res.status(500).json({ error: err.message });
                     res.json({ success: true, winner_telegram_id: winner.telegram_id, message: "Приз зачислен в инвентарь победителя." });
@@ -426,7 +471,6 @@ app.post('/api/admin/contest/draw/:id', (req, res) => {
         });
     });
 });
-
 
 app.listen(port, () => {
     console.log(`Сервер успешно запущен на порту ${port}`);
