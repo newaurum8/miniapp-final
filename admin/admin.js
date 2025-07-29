@@ -1,4 +1,15 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // --- БЛОК: Витягуємо секретний ключ з URL ---
+    const params = new URLSearchParams(window.location.search);
+    const ADMIN_SECRET_KEY = params.get('secret');
+
+    // Перевіряємо, чи є ключ, інакше робота неможлива
+    if (!ADMIN_SECRET_KEY) {
+        document.body.innerHTML = '<h1>Помилка: секретний ключ відсутній в URL-адресі.</h1>';
+        return;
+    }
+    // --- КІНЕЦЬ БЛОКУ ---
+
     const API_BASE_URL = '';
     const usersTableBody = document.querySelector('#users-table tbody');
     const caseItemsContainer = document.getElementById('case-items-container');
@@ -6,17 +17,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const gameManagementContainer = document.getElementById('game-management-container');
     const saveSettingsBtn = document.getElementById('save-settings-btn');
 
+
     // --- Секція 1: Управління користувачами ---
 
     async function fetchUsers() {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/admin/users`);
-            if (!response.ok) throw new Error(`Помилка мережі: ${response.status}`);
+            // Додаємо ключ до URL
+            const response = await fetch(`${API_BASE_URL}/api/admin/users?secret=${ADMIN_SECRET_KEY}`);
+            if (!response.ok) {
+                throw new Error(`Помилка завантаження: ${response.statusText}`);
+            }
             const users = await response.json();
             renderUsers(users);
         } catch (error) {
             console.error('Помилка при завантаженні користувачів:', error);
-            usersTableBody.innerHTML = '<tr><td colspan="5">Не вдалося завантажити користувачів. Переконайтеся, що сервер запущений.</td></tr>';
+            usersTableBody.innerHTML = '<tr><td colspan="5">Не вдалося завантажити користувачів. Перевірте консоль (F12).</td></tr>';
         }
     }
 
@@ -41,7 +56,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function updateUserBalance(userId, newBalance) {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/admin/user/balance`, {
+            // Додаємо ключ до URL
+            const response = await fetch(`${API_BASE_URL}/api/admin/user/balance?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userId, newBalance })
@@ -78,9 +94,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchAllDataForCases() {
         try {
+            // Додаємо ключ до URL
             const [itemsResponse, caseItemsResponse] = await Promise.all([
-                fetch(`${API_BASE_URL}/api/admin/items`),
-                fetch(`${API_BASE_URL}/api/admin/case/items`)
+                fetch(`${API_BASE_URL}/api/admin/items?secret=${ADMIN_SECRET_KEY}`),
+                fetch(`${API_BASE_URL}/api/admin/case/items?secret=${ADMIN_SECRET_KEY}`)
             ]);
             allPossibleItems = await itemsResponse.json();
             const caseIds = await caseItemsResponse.json();
@@ -100,9 +117,10 @@ document.addEventListener('DOMContentLoaded', () => {
             label.className = 'item-label';
             label.title = `${item.name} (Вартість: ${item.value})`;
 
+            // Використовуємо абсолютний шлях для зображень, щоб він працював коректно
             label.innerHTML = `
                 <input type="checkbox" class="item-checkbox" data-itemid="${item.id}" ${isChecked ? 'checked' : ''}>
-                <img src="../${item.imageSrc}" alt="${item.name}">
+                <img src="/${item.imageSrc}" alt="${item.name}">
                 <span>${item.name}</span>
             `;
 
@@ -129,7 +147,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const selectedItemIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.itemid));
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/admin/case/items`, {
+            // Додаємо ключ до URL
+            const response = await fetch(`${API_BASE_URL}/api/admin/case/items?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ itemIds: selectedItemIds })
@@ -165,7 +184,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchSettings() {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/game_settings`);
+            // Додаємо ключ до URL
+            const response = await fetch(`${API_BASE_URL}/api/game_settings?secret=${ADMIN_SECRET_KEY}`);
             const settings = await response.json();
             renderSettings(settings);
         } catch (error) {
@@ -197,7 +217,8 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/admin/game_settings`, {
+            // Додаємо ключ до URL
+            const response = await fetch(`${API_BASE_URL}/api/admin/game_settings?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ settings: settingsToSave })
@@ -209,8 +230,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error('Помилка при збереженні налаштувань.');
             }
         } catch (error) {
-            console.error('Помилка:', error);
-            alert('Не вдалося зберегти налаштування.');
+             console.error('Помилка:', error);
+             alert('Не вдалося зберегти налаштування.');
         }
     }
 
