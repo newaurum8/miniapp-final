@@ -9,31 +9,23 @@ const port = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
-// --- ОТДАЧА СТАТИЧЕСКИХ ФАЙЛОВ ---
-const miniappPath = path.join(__dirname, 'miniapp');
+// --- ВІДДАЧА СТАТИЧНИХ ФАЙЛІВ ---
+const miniappPath = path.join(__dirname, ''); // Шлях до поточної папки, де лежить servers.js
 
-// ЭТА СТРОКА ПОКАЖЕТ НАМ В ЛОГАХ, КАКОЙ ПУТЬ ИСПОЛЬЗУЕТСЯ
-console.log(`[Server] Путь к папке miniapp: ${miniappPath}`); 
+console.log(`[Server] Поточна робоча директорія: ${__dirname}`);
+console.log(`[Server] Шлях до статичних файлів: ${miniappPath}`);
 
 app.use(express.static(miniappPath));
 app.use('/admin', express.static(path.join(__dirname, 'admin')));
 
-// --- ДЕБАГ-МАРШРУТ НА СЛУЧАЙ ОШИБКИ ---
-// Если express.static не найдет index.html, в браузере появится это сообщение
-app.get('/', (req, res) => {
-    res.status(404).send('Сервер работает, но файл index.html не найден в папке miniapp. Проверьте структуру репозитория на GitHub.');
-});
 
-
-// --- (остальной ваш код без изменений) ---
-
-// Подключение к БД
-const dbPath = './database.sqlite';
+// Підключення до БД
+const dbPath = path.join(__dirname, 'database.sqlite');
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
-        console.error("Ошибка при подключении к БД:", err.message);
+        console.error("Помилка при підключенні до БД:", err.message);
     } else {
-        console.log("Успешное подключение к базе данных SQLite.");
+        console.log(`Успішне підключення до бази даних: ${dbPath}`);
         initializeDb();
     }
 });
@@ -67,20 +59,74 @@ function initializeDb() {
                 stmt.finalize();
             }
         });
-        
+
         db.run(`CREATE TABLE IF NOT EXISTS case_items (
             case_id INTEGER,
             item_id INTEGER,
             PRIMARY KEY (case_id, item_id),
             FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
         )`);
+
+        // НОВА ТАБЛИЦЯ ДЛЯ НАЛАШТУВАНЬ
+        db.run(`CREATE TABLE IF NOT EXISTS game_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )`, (err) => {
+            if (!err) {
+                const settings = [
+                    { key: 'miner_enabled', value: 'true' },
+                    { key: 'tower_enabled', value: 'true' },
+                    { key: 'slots_enabled', value: 'true' },
+                    { key: 'coinflip_enabled', value: 'true' },
+                    { key: 'rps_enabled', value: 'true' },
+                    { key: 'upgrade_enabled', value: 'true' }
+                ];
+                const stmt = db.prepare("INSERT OR IGNORE INTO game_settings (key, value) VALUES (?, ?)");
+                settings.forEach(s => stmt.run(s.key, s.value));
+                stmt.finalize();
+            }
+        });
     });
 }
 
-// --- API Маршруты ---
+// --- API Маршрути ---
+
+// Маршрут для отримання/створення користувача
+app.post('/api/user/get-or-create', (req, res) => {
+    const { telegram_id, username } = req.body;
+
+    if (!telegram_id) {
+        return res.status(400).json({ error: "telegram_id є обов'язковим" });
+    }
+
+    db.get("SELECT * FROM users WHERE telegram_id = ?", [telegram_id], (err, row) => {
+        if (err) {
+            return res.status(500).json({ error: err.message });
+        }
+
+        if (row) {
+            // Користувач знайдений, повертаємо його дані
+            res.json(row);
+        } else {
+            // Користувач не знайдений, створюємо нового
+            const initialBalance = 1000;
+            db.run("INSERT INTO users (telegram_id, username, balance) VALUES (?, ?, ?)", [telegram_id, username, initialBalance], function(err) {
+                if (err) {
+                    return res.status(500).json({ error: err.message });
+                }
+                // Повертаємо дані нового користувача
+                db.get("SELECT * FROM users WHERE id = ?", [this.lastID], (err, newUser) => {
+                    if (err) return res.status(500).json({ error: err.message });
+                    res.status(201).json(newUser);
+                });
+            });
+        }
+    });
+});
+
 
 app.get('/api/admin/users', (req, res) => {
-    db.all("SELECT id, telegram_id, username, balance FROM users", [], (err, rows) => {
+    db.all("SELECT id, telegram_id, username, balance FROM users ORDER BY id DESC", [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
         res.json(rows);
     });
@@ -124,23 +170,28 @@ app.post('/api/admin/case/items', (req, res) => {
 
         if (itemIds && itemIds.length > 0) {
             const stmt = db.prepare(`INSERT INTO case_items (case_id, item_id) VALUES (?, ?)`);
-            for (const itemId of itemIds) {
-                stmt.run(caseId, itemId);
-            }
+            itemIds.forEach(itemId => {
+                stmt.run(caseId, itemId, (err) => {
+                    if (err) {
+                        // Помилку треба обробляти всередині циклу, інакше вона не буде спіймана
+                        console.error("Error inserting item:", err);
+                    }
+                });
+            });
             stmt.finalize((err) => {
                 if (err) {
                     db.run("ROLLBACK");
-                    return res.status(500).json({ "error": err.message });
+                    return res.status(500).json({ "error": `Finalize error: ${err.message}` });
                 }
-                db.run("COMMIT", (err) => {
-                    if (err) return res.status(500).json({ "error": err.message });
-                    return res.json({ success: true });
+                db.run("COMMIT", (commitErr) => {
+                    if (commitErr) return res.status(500).json({ "error": `Commit error: ${commitErr.message}` });
+                    res.json({ success: true });
                 });
             });
         } else {
              db.run("COMMIT", (err) => {
                 if (err) return res.status(500).json({ "error": err.message });
-                return res.json({ success: true });
+                res.json({ success: true });
             });
         }
     });
@@ -148,7 +199,7 @@ app.post('/api/admin/case/items', (req, res) => {
 
 app.get('/api/admin/case/items_full', (req, res) => {
     const sql = `
-        SELECT i.id, i.name, i.imageSrc, i.value 
+        SELECT i.id, i.name, i.imageSrc, i.value
         FROM items i
         JOIN case_items ci ON i.id = ci.item_id
         WHERE ci.case_id = 1
@@ -159,8 +210,39 @@ app.get('/api/admin/case/items_full', (req, res) => {
     });
 });
 
+// Маршрути для налаштувань ігор
+app.get('/api/game_settings', (req, res) => {
+    db.all("SELECT key, value FROM game_settings", [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        const settings = rows.reduce((acc, row) => {
+            acc[row.key] = row.value;
+            return acc;
+        }, {});
+        res.json(settings);
+    });
+});
+
+app.post('/api/admin/game_settings', (req, res) => {
+    const { settings } = req.body;
+    if (!settings || typeof settings !== 'object') {
+        return res.status(400).json({ error: 'Неправильний формат налаштувань' });
+    }
+
+    db.serialize(() => {
+        const stmt = db.prepare("UPDATE game_settings SET value = ? WHERE key = ?");
+        Object.entries(settings).forEach(([key, value]) => {
+            stmt.run(value.toString(), key);
+        });
+        stmt.finalize(err => {
+            if (err) return res.status(500).json({ "error": err.message });
+            res.json({ success: true });
+        });
+    });
+});
+
+
 app.listen(port, () => {
-    console.log(`Сервер успешно запущен на порту ${port}`);
-    console.log(`Основное приложение: http://localhost:${port}`);
-    console.log(`Админ-панель: http://localhost:${port}/admin`);
+    console.log(`Сервер успішно запущен на порту ${port}`);
+    console.log(`Основний додаток: http://localhost:${port}/index.html`);
+    console.log(`Адмін-панель: http://localhost:${port}/admin/admin.html`);
 });
