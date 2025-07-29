@@ -1,36 +1,30 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // Используем относительный путь. Это позволит коду работать
-    // как на вашем компьютере (localhost), так и на хостинге.
-    const API_BASE_URL = ''; 
+    const API_BASE_URL = '';
     const usersTableBody = document.querySelector('#users-table tbody');
     const caseItemsContainer = document.getElementById('case-items-container');
     const saveCaseBtn = document.getElementById('save-case-btn');
+    const gameManagementContainer = document.getElementById('game-management-container');
+    const saveSettingsBtn = document.getElementById('save-settings-btn');
 
-    // --- Секция 1: Управление пользователями ---
+    // --- Секція 1: Управління користувачами ---
 
-    /**
-     * Загружает список пользователей с сервера и отображает их в таблице.
-     */
     async function fetchUsers() {
         try {
             const response = await fetch(`${API_BASE_URL}/api/admin/users`);
+            if (!response.ok) throw new Error(`Помилка мережі: ${response.status}`);
             const users = await response.json();
             renderUsers(users);
         } catch (error) {
-            console.error('Ошибка при загрузке пользователей:', error);
-            usersTableBody.innerHTML = '<tr><td colspan="5">Не удалось загрузить пользователей. Убедитесь, что сервер запущен.</td></tr>';
+            console.error('Помилка при завантаженні користувачів:', error);
+            usersTableBody.innerHTML = '<tr><td colspan="5">Не вдалося завантажити користувачів. Переконайтеся, що сервер запущений.</td></tr>';
         }
     }
 
-    /**
-     * Отрисовывает таблицу пользователей на основе полученных данных.
-     * @param {Array} users - Массив объектов пользователей.
-     */
     function renderUsers(users) {
-        usersTableBody.innerHTML = ''; // Очищаем таблицу перед заполнением
+        usersTableBody.innerHTML = '';
         if (users.length === 0) {
-             usersTableBody.innerHTML = '<tr><td colspan="5">Пользователи еще не зарегистрированы.</td></tr>';
-             return;
+            usersTableBody.innerHTML = '<tr><td colspan="5">Користувачі ще не зареєстровані.</td></tr>';
+            return;
         }
         users.forEach(user => {
             const row = document.createElement('tr');
@@ -39,19 +33,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${user.telegram_id || 'N/A'}</td>
                 <td>${user.username || 'N/A'}</td>
                 <td><input type="number" class="balance-input" value="${user.balance}"></td>
-                <td><button class="button-primary save-balance-btn" data-userid="${user.id}">Сохранить</button></td>
+                <td><button class="button-primary save-balance-btn" data-userid="${user.id}">Зберегти</button></td>
             `;
             usersTableBody.appendChild(row);
         });
     }
 
-    /**
-     * Отправляет на сервер запрос на обновление баланса пользователя.
-     * @param {string} userId - ID пользователя.
-     * @param {number} newBalance - Новый баланс.
-     */
     async function updateUserBalance(userId, newBalance) {
-         try {
+        try {
             const response = await fetch(`${API_BASE_URL}/api/admin/user/balance`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -59,19 +48,17 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if (result.success) {
-                alert(`Баланс пользователя ${userId} успешно обновлен.`);
+                alert(`Баланс користувача ${userId} успішно оновлено.`);
             } else {
-                 throw new Error('Сервер вернул ошибку при обновлении баланса.');
+                throw new Error('Сервер повернув помилку при оновленні балансу.');
             }
         } catch (error) {
-            console.error('Ошибка:', error);
-            alert('Не удалось обновить баланс. Проверьте консоль и лог сервера.');
+            console.error('Помилка:', error);
+            alert('Не вдалося оновити баланс. Перевірте консоль та лог сервера.');
         }
     }
-    
-    // Добавляем один обработчик событий на всю таблицу для эффективности
+
     usersTableBody.addEventListener('click', (e) => {
-        // Если кликнули на кнопку "Сохранить"
         if (e.target.classList.contains('save-balance-btn')) {
             const userId = e.target.dataset.userid;
             const balanceInput = e.target.closest('tr').querySelector('.balance-input');
@@ -79,20 +66,16 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!isNaN(newBalance) && newBalance >= 0) {
                 updateUserBalance(userId, newBalance);
             } else {
-                alert("Пожалуйста, введите корректное числовое значение для баланса.");
+                alert("Будь ласка, введіть коректне числове значення для балансу.");
             }
         }
     });
 
+    // --- Секція 2: Управління вмістом кейсу ---
 
-    // --- Секция 2: Управление содержимым кейса ---
+    let allPossibleItems = [];
+    let initialCaseItemIds = new Set();
 
-    let allPossibleItems = []; // Хранит список ВСЕХ предметов, которые есть в игре
-    let currentCaseItemIds = new Set(); // Хранит ID предметов, которые СЕЙЧАС в кейсе
-
-    /**
-     * Загружает одновременно и список всех предметов, и список предметов в кейсе.
-     */
     async function fetchAllDataForCases() {
         try {
             const [itemsResponse, caseItemsResponse] = await Promise.all([
@@ -101,39 +84,46 @@ document.addEventListener('DOMContentLoaded', () => {
             ]);
             allPossibleItems = await itemsResponse.json();
             const caseIds = await caseItemsResponse.json();
-            currentCaseItemIds = new Set(caseIds); // Используем Set для быстрого поиска
+            initialCaseItemIds = new Set(caseIds);
             renderCaseItemsSelection();
         } catch (error) {
-             console.error('Ошибка при загрузке данных для кейсов:', error);
+            console.error('Помилка при завантаженні даних для кейсів:', error);
         }
     }
 
-    /**
-     * Отрисовывает сетку со всеми предметами и отмечает галочками те, что уже в кейсе.
-     */
     function renderCaseItemsSelection() {
         caseItemsContainer.innerHTML = '';
         allPossibleItems.forEach(item => {
-            const isChecked = currentCaseItemIds.has(item.id);
+            const isChecked = initialCaseItemIds.has(item.id);
             const itemElement = document.createElement('div');
             const label = document.createElement('label');
             label.className = 'item-label';
-            label.title = `${item.name} (Стоимость: ${item.value})`;
+            label.title = `${item.name} (Вартість: ${item.value})`;
 
-            // Путь к картинке теперь относительный, чтобы работать на хостинге
             label.innerHTML = `
                 <input type="checkbox" class="item-checkbox" data-itemid="${item.id}" ${isChecked ? 'checked' : ''}>
                 <img src="../${item.imageSrc}" alt="${item.name}">
                 <span>${item.name}</span>
             `;
+
+            const checkbox = label.querySelector('.item-checkbox');
+            checkbox.addEventListener('change', () => {
+                const wasChecked = initialCaseItemIds.has(item.id);
+                const isNowChecked = checkbox.checked;
+
+                label.classList.remove('item-added', 'item-removed');
+
+                if (isNowChecked && !wasChecked) {
+                    label.classList.add('item-added');
+                } else if (!isNowChecked && wasChecked) {
+                    label.classList.add('item-removed');
+                }
+            });
             itemElement.appendChild(label);
             caseItemsContainer.appendChild(itemElement);
         });
     }
 
-    /**
-     * Собирает ID всех отмеченных предметов и отправляет на сервер для сохранения.
-     */
     async function saveCaseItems() {
         const selectedCheckboxes = caseItemsContainer.querySelectorAll('.item-checkbox:checked');
         const selectedItemIds = Array.from(selectedCheckboxes).map(cb => parseInt(cb.dataset.itemid));
@@ -144,28 +134,93 @@ document.addEventListener('DOMContentLoaded', () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ itemIds: selectedItemIds })
             });
-             const result = await response.json();
+            const result = await response.json();
             if (result.success) {
-                alert('Содержимое кейса успешно обновлено!');
-                // Обновляем локальное состояние, чтобы при следующем открытии все было верно
-                currentCaseItemIds = new Set(selectedItemIds); 
+                alert('Вміст кейсу успішно оновлено!');
+                initialCaseItemIds = new Set(selectedItemIds);
+                document.querySelectorAll('.item-label').forEach(label => {
+                    label.classList.remove('item-added', 'item-removed');
+                });
             } else {
-                 throw new Error('Ошибка при сохранении кейса');
+                throw new Error('Помилка при збереженні кейсу');
             }
         } catch (error) {
-            console.error('Ошибка:', error);
-            alert('Не удалось сохранить содержимое кейса.');
+            console.error('Помилка:', error);
+            alert('Не вдалося зберегти вміст кейсу.');
         }
     }
-    
+
     saveCaseBtn.addEventListener('click', saveCaseItems);
 
+    // --- Секція 3: Управління налаштуваннями ---
 
-    // --- Инициализация ---
-    // Запускаем загрузку всех данных при открытии страницы.
+    const gameNames = {
+        'miner_enabled': 'Мінер',
+        'tower_enabled': 'Вежа',
+        'slots_enabled': 'Слоти',
+        'coinflip_enabled': 'Орел і Решка',
+        'rps_enabled': 'Камінь-Ножиці-Папір',
+        'upgrade_enabled': 'Апгрейди'
+    };
+
+    async function fetchSettings() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/game_settings`);
+            const settings = await response.json();
+            renderSettings(settings);
+        } catch (error) {
+            console.error('Помилка при завантаженні налаштувань:', error);
+        }
+    }
+
+    function renderSettings(settings) {
+        gameManagementContainer.innerHTML = '';
+        for (const key in settings) {
+            if (gameNames[key]) {
+                const isChecked = settings[key] === 'true';
+                const item = document.createElement('div');
+                item.className = 'setting-item';
+                item.innerHTML = `
+                    <label for="${key}">${gameNames[key]}</label>
+                    <input type="checkbox" id="${key}" data-key="${key}" class="toggle-switch" ${isChecked ? 'checked' : ''}>
+                `;
+                gameManagementContainer.appendChild(item);
+            }
+        }
+    }
+
+    async function saveSettings() {
+        const settingsToSave = {};
+        const checkboxes = gameManagementContainer.querySelectorAll('input[type="checkbox"]');
+        checkboxes.forEach(cb => {
+            settingsToSave[cb.dataset.key] = cb.checked;
+        });
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/admin/game_settings`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ settings: settingsToSave })
+            });
+            const result = await response.json();
+            if (result.success) {
+                alert('Налаштування успішно збережено!');
+            } else {
+                throw new Error('Помилка при збереженні налаштувань.');
+            }
+        } catch (error) {
+            console.error('Помилка:', error);
+            alert('Не вдалося зберегти налаштування.');
+        }
+    }
+
+    saveSettingsBtn.addEventListener('click', saveSettings);
+
+    // --- Ініціалізація ---
     function init() {
         fetchUsers();
         fetchAllDataForCases();
+        fetchSettings();
     }
 
     init();
