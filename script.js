@@ -58,7 +58,8 @@ document.addEventListener('DOMContentLoaded', function() {
             levels: 5,
             grid: [],
             payouts: [],
-            multipliers: [1.5, 2.5, 4, 8, 16]
+            multipliers: [1.5, 2.5, 4, 8, 16],
+            nextLevelTimeout: null // Для отмены таймаута
         }
     };
 
@@ -905,9 +906,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- ЛОГИКА БАШНИ (TOWER) ---
     function resetTowerGame() {
         if (!UI.towerGameBoard) return;
+        // Отменяем любой отложенный переход на следующий уровень
+        if (STATE.towerState.nextLevelTimeout) {
+            clearTimeout(STATE.towerState.nextLevelTimeout);
+        }
+
         STATE.towerState.isActive = false;
         STATE.towerState.isCashingOut = false;
         STATE.towerState.currentLevel = 0;
+        STATE.towerState.nextLevelTimeout = null;
 
         UI.towerGameBoard.innerHTML = '';
         UI.towerInitialControls.classList.remove('hidden');
@@ -947,16 +954,13 @@ document.addEventListener('DOMContentLoaded', function() {
         renderTower();
     }
     
-    // ИСПРАВЛЕННАЯ ФУНКЦИЯ
     function renderTower() {
         if (!UI.towerGameBoard) return;
         UI.towerGameBoard.innerHTML = '';
-        // Цикл идет от 0 (нижний ряд) до levels-1 (верхний ряд)
         for (let i = 0; i < STATE.towerState.levels; i++) {
             const rowEl = document.createElement('div');
             rowEl.classList.add('tower-row');
-            
-            // Активируем ряд, если он текущий для выбора
+
             if (STATE.towerState.isActive && i === STATE.towerState.currentLevel) {
                 rowEl.classList.add('active');
             }
@@ -968,42 +972,34 @@ document.addEventListener('DOMContentLoaded', function() {
                 cell.classList.add('tower-cell');
                 cell.dataset.col = j;
                 cell.innerHTML = `+${payout.toLocaleString('ru-RU')}`;
-                
-                // Добавляем обработчик клика только на активный ряд
+
                 if (STATE.towerState.isActive && i === STATE.towerState.currentLevel) {
                     cell.addEventListener('click', () => handleTowerCellClick(i, j), { once: true });
                 }
-
-                // Отображаем состояние пройденных рядов
                 if (i < STATE.towerState.currentLevel) {
                     const bombCol = STATE.towerState.grid[i];
                     if (j !== bombCol) {
                         cell.classList.add('safe');
                         cell.innerHTML = `<img src="images/diamond.png" alt="Win">`;
                     } else {
-                        cell.style.opacity = "0.5"; // Делаем ячейку с бомбой полупрозрачной
+                        cell.style.opacity = "0.5";
                     }
                 }
                 rowEl.appendChild(cell);
             }
-            // Добавляем ряд в контейнер. Из-за column-reverse он окажется на правильной визуальной позиции
             UI.towerGameBoard.appendChild(rowEl);
         }
     }
 
-    // ИСПРАВЛЕННАЯ ФУНКЦИЯ
     function handleTowerCellClick(row, col) {
-        if (!STATE.towerState.isActive || row !== STATE.towerState.currentLevel) return;
+        if (!STATE.towerState.isActive || STATE.towerState.isCashingOut || row !== STATE.towerState.currentLevel) return;
 
         STATE.towerState.isActive = false;
-        UI.towerCashoutBtn.disabled = true; // Сразу блокируем кнопку
 
         const bombCol = STATE.towerState.grid[row];
-        // Находим правильный DOM-элемент для строки
-        const clickedRowEl = UI.towerGameBoard.children[row];
+        const clickedRowEl = UI.towerGameBoard.children[row]; 
         const cells = clickedRowEl.querySelectorAll('.tower-cell');
 
-        // Показываем результат клика
         cells.forEach((c, c_index) => {
             if (c_index === bombCol) {
                 c.classList.add('danger');
@@ -1016,23 +1012,19 @@ document.addEventListener('DOMContentLoaded', function() {
         clickedRowEl.classList.remove('active');
 
         if (col === bombCol) {
-            // Проигрыш
+            UI.towerCashoutBtn.disabled = true;
             setTimeout(() => endTowerGame(false), 1200);
         } else {
-            // Выигрыш
             STATE.towerState.currentLevel++;
             const cashoutAmount = STATE.towerState.payouts[STATE.towerState.currentLevel - 1];
 
             UI.towerCashoutBtn.textContent = `Забрать ${cashoutAmount.toLocaleString('ru-RU')} ⭐`;
-            // Разблокируем кнопку только если не проиграли
             UI.towerCashoutBtn.disabled = false;
 
             if (STATE.towerState.currentLevel === STATE.towerState.levels) {
-                // Достигли вершины
                 setTimeout(() => endTowerGame(true), 1200);
             } else {
-                // Переходим на следующий уровень
-                setTimeout(() => {
+                STATE.towerState.nextLevelTimeout = setTimeout(() => {
                     STATE.towerState.isActive = true;
                     renderTower();
                 }, 800);
@@ -1040,10 +1032,14 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ИСПРАВЛЕННАЯ ФУНКЦИЯ
     function endTowerGame(isWin) {
+        if (STATE.towerState.nextLevelTimeout) {
+            clearTimeout(STATE.towerState.nextLevelTimeout);
+            STATE.towerState.nextLevelTimeout = null;
+        }
+
         STATE.towerState.isActive = false;
-        UI.towerCashoutBtn.disabled = true; // Финальная блокировка кнопки
+        UI.towerCashoutBtn.disabled = true; 
         let winAmount = 0;
 
         if (isWin && STATE.towerState.currentLevel > 0) {
@@ -1053,7 +1049,6 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification(`Выигрыш ${winAmount.toLocaleString('ru-RU')} ⭐ зачислен!`);
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
-            // Показываем все остальные бомбы
             for(let i = STATE.towerState.currentLevel; i < STATE.towerState.levels; i++) {
                 const rowEl = UI.towerGameBoard.children[i];
                  if(rowEl) {
@@ -1072,7 +1067,15 @@ document.addEventListener('DOMContentLoaded', function() {
     function cashoutTower() {
         if (STATE.towerState.currentLevel === 0 || STATE.towerState.isCashingOut) return;
 
+        if (STATE.towerState.nextLevelTimeout) {
+            clearTimeout(STATE.towerState.nextLevelTimeout);
+            STATE.towerState.nextLevelTimeout = null;
+        }
+        
         STATE.towerState.isCashingOut = true;
+        STATE.towerState.isActive = false; 
+        UI.towerCashoutBtn.disabled = true;
+
         endTowerGame(true);
     }
     // --- КОНЕЦ ЛОГИКИ БАШНИ ---
