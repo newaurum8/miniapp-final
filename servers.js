@@ -10,7 +10,8 @@ app.use(cors());
 app.use(express.json());
 
 // --- ЗАХИСТ АДМІН-ПАНЕЛІ ---
-const ADMIN_SECRET = "Aurum'; // <-- ЗАМІНІТЬ ЦЕ НА ВАШ ВЛАСНИЙ СЕКРЕТНИЙ КЛЮЧ
+// 👇 ПОМИЛКА БУЛА ТУТ. Тепер вона виправлена.
+const ADMIN_SECRET = 'Aurum'; // <-- ЗАМІНІТЬ ЦЕ НА ВАШ ВЛАСНИЙ СЕКРЕТНИЙ КЛЮЧ
 
 const checkAdminSecret = (req, res, next) => {
     const { secret } = req.query;
@@ -226,13 +227,11 @@ app.get('/api/game_settings', (req, res) => {
     });
 });
 
-// 👇 ОСЬ ТУТ БУЛО ВИПРАВЛЕНО ЛОГІКУ ЗБЕРЕЖЕННЯ
 app.post('/api/admin/game_settings', (req, res) => {
     const { settings } = req.body;
     if (!settings || typeof settings !== 'object') {
         return res.status(400).json({ error: 'Неправильний формат налаштувань' });
     }
-
     db.serialize(() => {
         db.run("BEGIN TRANSACTION");
         const stmt = db.prepare("UPDATE game_settings SET value = ? WHERE key = ?");
