@@ -1,7 +1,8 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // --- ГЛОБАЛЬНИЙ СТАН ---
+    // --- ГЛОБАЛЬНЫЙ СТАТУС ---
     const STATE = {
-        userBalance: 0, // Початковий баланс буде отримано з сервера
+        user: null, // Хранит данные о текущем пользователе
+        userBalance: 0,
         inventory: [],
         gameHistory: [],
         isSpinning: false,
@@ -9,12 +10,10 @@ document.addEventListener('DOMContentLoaded', function() {
         openQuantity: 1,
         casePrice: 100,
         lastWonItems: [],
-        contestTicketPrice: 100,
+        contest: null, // Данные о текущем конкурсе будут загружаться сюда
         ticketQuantity: 1,
-        userTickets: 0,
-        contestEndDate: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000 + 15 * 60 * 60 * 1000),
         possibleItems: [],
-        gameSettings: {}, // Для зберігання налаштувань ігор
+        gameSettings: {}, // Для хранения настроек игр
         upgradeState: {
             yourItem: null,
             desiredItem: null,
@@ -62,10 +61,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     };
 
-    // --- ОБ'ЄКТ З ЕЛЕМЕНТАМИ DOM ---
+    // --- ОБЪЕКТ С ЭЛЕМЕНТАМИ DOM ---
     const UI = {};
 
-    // --- ФУНКЦІЇ ---
+    // --- ФУНКЦИИ ---
 
     function showNotification(message) {
         if (!UI.notificationToast) return;
@@ -87,12 +86,16 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!response.ok) throw new Error('Authentication failed');
 
             const userData = await response.json();
+            STATE.user = userData;
             STATE.userBalance = userData.balance;
             updateBalanceDisplay();
+            
+            // После успешной аутентификации загружаем остальные данные
+            loadInitialData();
 
         } catch (error) {
-            console.error("Помилка автентифікації:", error);
-            showNotification('Не вдалося підключитися до сервера.');
+            console.error("Ошибка аутентификации:", error);
+            showNotification('Не удалось подключиться к серверу.');
         }
     }
 
@@ -100,6 +103,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const tg = window.Telegram.WebApp;
             tg.ready();
+            tg.expand(); // Раскрываем приложение на весь экран
             tg.BackButton.hide();
             const user = tg.initDataUnsafe.user;
             
@@ -109,14 +113,16 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (UI.profileId) UI.profileId.textContent = `ID ${user.id}`;
                 authenticateUser(user);
             } else {
-                 console.warn("Дані користувача Telegram не знайдено. Робота в режимі гостя.");
+                 console.warn("Данные пользователя Telegram не найдены. Работа в режиме гостя.");
+                 STATE.user = { id: 0, telegram_id: 0, username: "Guest", balance: 1000 };
                  if (UI.profileName) UI.profileName.textContent = "Guest";
                  if (UI.profileId) UI.profileId.textContent = "ID 0";
-                 STATE.userBalance = 1000; // Встановлюємо баланс за замовчуванням для тесту
+                 STATE.userBalance = 1000;
                  updateBalanceDisplay();
+                 loadInitialData(); // Загружаем данные для гостя
             }
         } catch (error) {
-            console.error("Не вдалося завантажити дані Telegram:", error);
+            console.error("Не удалось загрузить данные Telegram:", error);
             if (UI.profileName) UI.profileName.textContent = "Guest";
             if (UI.profileId) UI.profileId.textContent = "ID 0";
         }
@@ -127,12 +133,12 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const tg = window.Telegram.WebApp;
             const user = tg.initDataUnsafe.user;
-            const app_url = `https://t.me/qqtest134_bot/website?startapp=${user.id}`;
-            const text = `Привіт! Приєднуйся до StarsDrop та отримуй круті подарунки!`;
+            const app_url = `https://t.me/qqtest134_bot/website?startapp=${user.id}`; // ЗАМЕНИТЕ НА ВАШУ ССЫЛКУ
+            const text = `Привет! Присоединяйся к StarsDrop и получай крутые подарки!`;
             tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(app_url)}&text=${encodeURIComponent(text)}`);
         } catch(e) {
             console.error(e);
-            showNotification("Функція доступна лише в Telegram.");
+            showNotification("Функция доступна только в Telegram.");
         }
     }
 
@@ -140,16 +146,16 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const tg = window.Telegram.WebApp;
             const user = tg.initDataUnsafe.user;
-            const app_url = `https://t.me/qqtest134_bot/website?startapp=${user.id}`;
+            const app_url = `https://t.me/qqtest134_bot/website?startapp=${user.id}`; // ЗАМЕНИТЕ НА ВАШУ ССЫЛКУ
             navigator.clipboard.writeText(app_url).then(() => {
-                showNotification('Посилання скопійовано!');
+                showNotification('Ссылка скопирована!');
             }).catch(err => {
-                console.error('Не вдалося скопіювати посилання: ', err);
-                showNotification('Помилка копіювання.');
+                console.error('Не удалось скопировать ссылку: ', err);
+                showNotification('Ошибка копирования.');
             });
         } catch(e) {
             console.error(e);
-            showNotification("Функція доступна лише в Telegram.");
+            showNotification("Функция доступна только в Telegram.");
         }
     }
 
@@ -175,7 +181,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function switchView(viewId) {
         UI.views.forEach(view => {
-            view.style.display = 'none';
             view.classList.remove('active');
         });
         UI.navButtons.forEach(btn => btn.classList.remove('active'));
@@ -184,7 +189,6 @@ document.addEventListener('DOMContentLoaded', function() {
         let btnToActivate;
 
         if (viewToShow) {
-            viewToShow.style.display = 'flex';
             viewToShow.classList.add('active');
             if (['upgrade-view', 'miner-view', 'coinflip-view', 'rps-view', 'slots-view', 'tower-view'].includes(viewId)) {
                 btnToActivate = document.querySelector('.nav-btn[data-view="games-menu-view"]');
@@ -192,8 +196,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 btnToActivate = document.querySelector(`.nav-btn[data-view="${viewId}"]`);
             }
         } else {
-            console.error(`Екран з ID "${viewId}" не знайдено. Повернення на головний екран.`);
-            document.getElementById('game-view').style.display = 'flex';
+            console.error(`Экран с ID "${viewId}" не найден. Возврат на главный экран.`);
             document.getElementById('game-view').classList.add('active');
             btnToActivate = document.querySelector('.nav-btn[data-view="game-view"]');
         }
@@ -208,10 +211,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 tg.BackButton.offClick();
             }
 
-            if (['upgrade-view', 'miner-view', 'coinflip-view', 'rps-view', 'slots-view', 'tower-view'].includes(viewId)) {
+            const isGameScreen = ['upgrade-view', 'miner-view', 'coinflip-view', 'rps-view', 'slots-view', 'tower-view'].includes(viewId);
+            const isMenuScreen = ['games-menu-view', 'contests-view', 'friends-view', 'profile-view'].includes(viewId);
+
+            if (isGameScreen) {
                 tg.BackButton.show();
                 tg.BackButton.onClick(() => switchView('games-menu-view'));
-            } else if (['games-menu-view', 'contests-view', 'friends-view', 'profile-view'].includes(viewId)) {
+            } else if (isMenuScreen && viewId !== 'game-view') {
                  tg.BackButton.show();
                  tg.BackButton.onClick(() => switchView('game-view'));
             }
@@ -242,7 +248,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!UI.inventoryContent) return;
         UI.inventoryContent.innerHTML = '';
         if (STATE.inventory.length === 0) {
-            UI.inventoryContent.innerHTML = `<p class="inventory-empty-msg">Ваш інвентар порожній</p>`;
+            UI.inventoryContent.innerHTML = `<p class="inventory-empty-msg">Ваш инвентарь пуст</p>`;
             return;
         }
         STATE.inventory.forEach((item) => {
@@ -252,7 +258,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <img src="${item.imageSrc}" alt="${item.name}">
                 <div class="inventory-item-name">${item.name}</div>
                 <button class="inventory-sell-btn">
-                    Продати за <span class="icon">⭐</span> ${item.value.toLocaleString('ru-RU')}
+                    Продать за <span class="icon">⭐</span> ${item.value.toLocaleString('ru-RU')}
                 </button>
             `;
             itemEl.querySelector('.inventory-sell-btn').addEventListener('click', () => sellFromInventory(item.uniqueId));
@@ -274,7 +280,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!UI.historyContent) return;
         UI.historyContent.innerHTML = '';
         if (STATE.gameHistory.length === 0) {
-            UI.historyContent.innerHTML = `<p class="inventory-empty-msg">Історія ігор порожня</p>`;
+            UI.historyContent.innerHTML = `<p class="inventory-empty-msg">История игр пуста</p>`;
             return;
         }
         [...STATE.gameHistory].reverse().forEach(entry => {
@@ -306,7 +312,7 @@ document.addEventListener('DOMContentLoaded', function() {
             UI.priceCheckMessage.classList.remove('error');
             UI.startSpinBtn.disabled = false;
         } else {
-            UI.priceCheckMessage.innerHTML = `⭐ ${totalCost.toLocaleString('ru-RU')} (не вистачає ${(totalCost - STATE.userBalance).toLocaleString('ru-RU')})`;
+            UI.priceCheckMessage.innerHTML = `⭐ ${totalCost.toLocaleString('ru-RU')} (не хватает ${(totalCost - STATE.userBalance).toLocaleString('ru-RU')})`;
             UI.priceCheckMessage.classList.add('error');
             UI.startSpinBtn.disabled = true;
         }
@@ -325,12 +331,12 @@ document.addEventListener('DOMContentLoaded', function() {
     function startSpinProcess() {
         if (STATE.isSpinning) return;
         if (STATE.possibleItems.length === 0) {
-            showNotification("Помилка: вміст кейсу не завантажено. Спробуйте перезавантажити сторінку.");
+            showNotification("Ошибка: содержимое кейса не загружено. Попробуйте перезагрузить страницу.");
             return;
         }
         const totalCost = STATE.casePrice * STATE.openQuantity;
         if (STATE.userBalance < totalCost) {
-            showNotification("Недостатньо коштів.");
+            showNotification("Недостаточно средств.");
             return;
         }
 
@@ -347,7 +353,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         STATE.lastWonItems = wonItems;
         STATE.inventory.push(...wonItems);
-        STATE.gameHistory.push(...wonItems.map(item => ({ ...item, date: new Date(), name: `Виграш з кейсу` })));
+        STATE.gameHistory.push(...wonItems.map(item => ({ ...item, date: new Date(), name: `Выигрыш из кейса` })));
 
 
         UI.caseView.classList.add('hidden');
@@ -440,11 +446,11 @@ document.addEventListener('DOMContentLoaded', function() {
         modalContent.classList.add('modal-content');
         modalContent.innerHTML = `
             <button class="close-btn">✖</button>
-            <h2 class="modal-case-title">Ваш виграш:</h2>
+            <h2 class="modal-case-title">Ваш выигрыш:</h2>
             <div class="result-items-container"></div>
             <div class="result-buttons">
-                <button class="secondary-button" id="result-sell-btn">Продати все за ⭐ ${totalValue.toLocaleString('ru-RU')}</button>
-                <button class="primary-button" id="result-spin-again-btn">Крутити ще</button>
+                <button class="secondary-button" id="result-sell-btn">Продать все за ⭐ ${totalValue.toLocaleString('ru-RU')}</button>
+                <button class="primary-button" id="result-spin-again-btn">Крутить еще</button>
             </div>
         `;
         const itemsContainer = modalContent.querySelector('.result-items-container');
@@ -486,7 +492,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!UI.caseContentsPreview) return;
         UI.caseContentsPreview.innerHTML = '';
         if (STATE.possibleItems.length === 0) {
-            UI.caseContentsPreview.innerHTML = `<p class="inventory-empty-msg">Вміст кейсу порожній</p>`;
+            UI.caseContentsPreview.innerHTML = `<p class="inventory-empty-msg">Содержимое кейса пусто</p>`;
             return;
         }
         [...STATE.possibleItems].sort((a, b) => b.value - a.value).forEach(item => {
@@ -497,14 +503,66 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // --- ЛОГІКА КОНКУРСІВ ---
+    // --- ЛОГИКА КОНКУРСОВ ---
+    
     function updateContestUI() {
-        if (!UI.buyTicketBtn) return;
-        const totalCost = STATE.contestTicketPrice * STATE.ticketQuantity;
-        UI.buyTicketBtn.innerHTML = `Купити квиток <span class="icon">⭐</span> ${totalCost.toLocaleString('ru-RU')}`;
-        UI.ticketQuantityInput.value = STATE.ticketQuantity;
-        UI.userTicketsDisplay.textContent = STATE.userTickets;
-        UI.buyTicketBtn.disabled = STATE.userBalance < totalCost;
+        if (!UI.contestsView || !UI.contestsView.classList.contains('active')) return;
+
+        const contest = STATE.contest;
+        if (!contest) {
+            if (UI.contestCard) UI.contestCard.innerHTML = '<p class="inventory-empty-msg">Активных конкурсов сейчас нет.</p>';
+            return;
+        }
+
+        // Восстанавливаем структуру карточки, если она была очищена
+        if (!document.getElementById('contest-item-image')) {
+            UI.contestCard.innerHTML = `
+                <div class="contest-header">
+                    <span class="contest-header__title">Конкурс за билеты</span>
+                    <span class="contest-header__timer" id="contest-timer"></span>
+                </div>
+                <div class="contest-item">
+                    <img src="" alt="Prize" class="contest-item__image" id="contest-item-image">
+                    <div class="contest-item__info">
+                        <div class="contest-item__name" id="contest-item-name"></div>
+                        <div class="contest-item__meta">
+                            <span>Твои билеты: <b id="user-tickets-display">0</b></span>
+                            <span id="contest-participants">👥 0</span>
+                            <a href="#" class="contest-item__link">Последние победители</a>
+                        </div>
+                    </div>
+                </div>
+                <div class="purchase-section">
+                    <h3 class="purchase-section__title">Покупка билетов</h3>
+                    <div class="purchase-controls">
+                        <button class="primary-button" id="buy-ticket-btn">Купить билет</button>
+                        <div class="quantity-control">
+                            <button id="ticket-quantity-minus" class="quantity-control__btn">-</button>
+                            <input type="text" id="ticket-quantity-input" class="quantity-control__input" value="1" readonly>
+                            <button id="ticket-quantity-plus" class="quantity-control__btn">+</button>
+                        </div>
+                    </div>
+                </div>`;
+            
+            // Переназначаем события, т.к. мы пересоздали DOM
+            document.getElementById('buy-ticket-btn').addEventListener('click', buyTickets);
+            document.getElementById('ticket-quantity-plus').addEventListener('click', () => handleTicketQuantityChange(1));
+            document.getElementById('ticket-quantity-minus').addEventListener('click', () => handleTicketQuantityChange(-1));
+        }
+
+        // Обновляем динамические элементы
+        document.getElementById('contest-item-image').src = contest.item_imageSrc;
+        document.getElementById('contest-item-name').textContent = contest.item_name;
+        document.getElementById('user-tickets-display').textContent = contest.userTickets || 0;
+        document.getElementById('contest-participants').innerHTML = `👥 ${contest.participants || 0}`;
+
+        const buyBtn = document.getElementById('buy-ticket-btn');
+        const quantityInput = document.getElementById('ticket-quantity-input');
+        const totalCost = contest.ticket_price * STATE.ticketQuantity;
+        
+        buyBtn.innerHTML = `Купить (${STATE.ticketQuantity}) за ⭐ ${totalCost.toLocaleString('ru-RU')}`;
+        quantityInput.value = STATE.ticketQuantity;
+        buyBtn.disabled = STATE.userBalance < totalCost;
     }
 
     function handleTicketQuantityChange(amount) {
@@ -515,32 +573,80 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function buyTickets() {
-        const totalCost = STATE.contestTicketPrice * STATE.ticketQuantity;
+    async function buyTickets() {
+        if (!STATE.contest || !STATE.user) return;
+        const totalCost = STATE.contest.ticket_price * STATE.ticketQuantity;
         if (STATE.userBalance < totalCost) {
-            showNotification('Недостатньо коштів.');
+            showNotification('Недостаточно средств.');
             return;
         }
-        STATE.userBalance -= totalCost;
-        STATE.userTickets += STATE.ticketQuantity;
-        showNotification(`Ви успішно придбали ${STATE.ticketQuantity} квиток(ів)!`);
-        updateBalanceDisplay();
-        updateContestUI();
+
+        try {
+            const response = await fetch('/api/contest/buy-ticket', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contest_id: STATE.contest.id,
+                    telegram_id: STATE.user.telegram_id,
+                    quantity: STATE.ticketQuantity
+                })
+            });
+            const result = await response.json();
+
+            if (result.success) {
+                showNotification(`Вы успешно приобрели ${STATE.ticketQuantity} билет(ов)!`);
+                STATE.userBalance = result.newBalance;
+                
+                // Обновляем локальные данные о конкурсе
+                if (STATE.contest) {
+                    STATE.contest.userTickets = (STATE.contest.userTickets || 0) + STATE.ticketQuantity;
+                    STATE.contest.count = (STATE.contest.count || 0) + STATE.ticketQuantity;
+                }
+                
+                updateBalanceDisplay();
+                updateContestUI();
+            } else {
+                throw new Error(result.error || 'Неизвестная ошибка');
+            }
+        } catch (error) {
+            console.error("Ошибка при покупке билета:", error);
+            showNotification(`Ошибка: ${error.message}`);
+        }
+    }
+    
+    let timerInterval = null;
+    function setupTimer() {
+        if (timerInterval) clearInterval(timerInterval);
+        if(STATE.contest){
+            updateTimer();
+            timerInterval = setInterval(updateTimer, 1000);
+        }
     }
 
     function updateTimer() {
-        if (!UI.contestTimer) return;
-        const now = new Date(), timeLeft = STATE.contestEndDate - now;
-        if (timeLeft <= 0) {
-            UI.contestTimer.textContent = 'Конкурс завершено';
+        const contestTimerEl = document.getElementById('contest-timer');
+        if (!contestTimerEl || !STATE.contest) {
+            if(timerInterval) clearInterval(timerInterval);
             return;
         }
-        const days = Math.floor(timeLeft / 86400000), hours = Math.floor((timeLeft % 86400000) / 3600000), minutes = Math.floor((timeLeft % 3600000) / 60000), seconds = Math.floor((timeLeft % 60000) / 1000);
-        UI.contestTimer.textContent = `${days} днів ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} 🕔`;
-    }
-    // --- КІНЕЦЬ ЛОГІКИ КОНКУРСІВ ---
 
-    // --- ЛОГІКА АПГРЕЙДУ ---
+        const timeLeft = STATE.contest.end_time - Date.now();
+        if (timeLeft <= 0) {
+            contestTimerEl.textContent = 'Конкурс завершен';
+            clearInterval(timerInterval);
+            // Можно добавить логику для автоматического обновления данных о конкурсе
+            setTimeout(loadInitialData, 5000); 
+            return;
+        }
+        const days = Math.floor(timeLeft / 86400000);
+        const hours = Math.floor((timeLeft % 86400000) / 3600000);
+        const minutes = Math.floor((timeLeft % 3600000) / 60000);
+        const seconds = Math.floor((timeLeft % 60000) / 1000);
+        contestTimerEl.textContent = `${days}д ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+    // --- КОНЕЦ ЛОГИКИ КОНКУРСОВ ---
+
+    // --- ЛОГИКА АПГРЕЙДА ---
     function resetUpgradeState(resetRotation = false) {
         if (!UI.upgradePointer) return;
         STATE.upgradeState.yourItem = null;
@@ -604,7 +710,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const { activePicker, yourItem, desiredItem } = STATE.upgradeState;
         const sourceList = activePicker === 'inventory' ? STATE.inventory : STATE.possibleItems;
         if (sourceList.length === 0) {
-            UI.itemPickerContent.innerHTML = `<p class="picker-empty-msg">Список порожній</p>`;
+            UI.itemPickerContent.innerHTML = `<p class="picker-empty-msg">Список пуст</p>`;
             return;
         }
         sourceList.forEach(item => {
@@ -649,13 +755,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 const itemIndex = STATE.inventory.findIndex(invItem => invItem.uniqueId === yourItem.uniqueId);
                 if (itemIndex > -1) STATE.inventory.splice(itemIndex, 1);
                 if (isSuccess) {
-                    showNotification(`Апгрейд успішний! Ви отримали ${desiredItem.name}.`);
+                    showNotification(`Апгрейд успешный! Вы получили ${desiredItem.name}.`);
                     const newItem = { ...desiredItem, uniqueId: Date.now() };
                     STATE.inventory.push(newItem);
                     STATE.gameHistory.push({ ...newItem, date: new Date(), name: `Апгрейд до ${newItem.name}`, value: newItem.value });
                 } else {
-                    showNotification(`На жаль, апгрейд не вдався. Предмет втрачено.`);
-                    STATE.gameHistory.push({ ...yourItem, date: new Date(), name: `Невдалий апгрейд ${yourItem.name}`, value: -yourItem.value });
+                    showNotification(`К сожалению, апгрейд не удался. Предмет потерян.`);
+                    STATE.gameHistory.push({ ...yourItem, date: new Date(), name: `Неудачный апгрейд ${yourItem.name}`, value: -yourItem.value });
                 }
                 resetUpgradeState(true);
                 renderInventory();
@@ -663,9 +769,9 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 1500);
         }, { once: true });
     }
-    // --- КІНЕЦЬ ЛОГІКИ АПГРЕЙДУ ---
+    // --- КОНЕЦ ЛОГИКИ АПГРЕЙДА ---
 
-    // --- ЛОГІКА МІНЕРА ---
+    // --- ЛОГИКА МИНЕРА ---
     function resetMinerGame() {
         if (!UI.minerGrid) return;
         STATE.minerState.isActive = false;
@@ -683,11 +789,11 @@ document.addEventListener('DOMContentLoaded', function() {
     function startMinerGame() {
         const bet = parseInt(UI.minerBetInput.value);
         if (isNaN(bet) || bet <= 0) {
-            showNotification("Некоректна ставка");
+            showNotification("Некорректная ставка");
             return;
         }
         if (STATE.userBalance < bet) {
-            showNotification("Недостатньо коштів");
+            showNotification("Недостаточно средств");
             return;
         }
 
@@ -797,11 +903,11 @@ document.addEventListener('DOMContentLoaded', function() {
         STATE.minerState.isActive = false;
 
         if (isWin) {
-            showNotification(`Виграш ${STATE.minerState.totalWin.toFixed(2)} ⭐ зараховано!`);
+            showNotification(`Выигрыш ${STATE.minerState.totalWin.toFixed(2)} ⭐ зачислен!`);
             STATE.userBalance += STATE.minerState.totalWin;
             updateBalanceDisplay();
         } else {
-            showNotification("Ви програли! Ставка згоріла.");
+            showNotification("Вы проиграли! Ставка сгорела.");
         }
 
         STATE.minerState.grid.forEach(cell => {
@@ -816,19 +922,19 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!STATE.minerState.isActive || STATE.minerState.openedCrystals === 0) return;
         endMinerGame(true);
     }
-    // --- КІНЕЦЬ ЛОГІКИ МІНЕРА ---
+    // --- КОНЕЦ ЛОГИКИ МИНЕРА ---
 
-    // --- ЛОГІКА СЛОТІВ ---
+    // --- ЛОГИКА СЛОТОВ ---
     function handleSlotsSpin() {
         if (!UI.slotsSpinBtn || STATE.slotsState.isSpinning) return;
         
         const bet = parseInt(UI.slotsBetInput.value);
         if (isNaN(bet) || bet <= 0) {
-            showNotification("Некоректна ставка");
+            showNotification("Некорректная ставка");
             return;
         }
         if (STATE.userBalance < bet) {
-            showNotification("Недостатньо коштів");
+            showNotification("Недостаточно средств");
             return;
         }
 
@@ -879,16 +985,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function processSlotsResult(results, bet) {
         let win = 0;
-        let message = "Спробуйте ще раз!";
+        let message = "Попробуйте еще раз!";
 
         const [r1, r2, r3] = results;
 
         if (r1.name === r2.name && r2.name === r3.name) {
             win = bet * 2;
-            message = `Перемога! Виграш x2!`;
+            message = `Победа! Выигрыш x2!`;
         } else if (r1.name === r2.name || r1.name === r3.name || r2.name === r3.name) {
             win = bet * 1.5;
-            message = `Непогано! Виграш x1.5!`;
+            message = `Неплохо! Выигрыш x1.5!`;
         }
 
         if (win > 0) {
@@ -903,9 +1009,9 @@ document.addEventListener('DOMContentLoaded', function() {
         STATE.slotsState.isSpinning = false;
         UI.slotsSpinBtn.disabled = false;
     }
-    // --- КІНЕЦЬ ЛОГІКИ СЛОТІВ ---
+    // --- КОНЕЦ ЛОГИКИ СЛОТОВ ---
 
-    // --- ЛОГІКА ВЕЖІ (TOWER) ---
+    // --- ЛОГИКА БАШНИ (TOWER) ---
     function resetTowerGame() {
         if (!UI.towerGameBoard) return;
         STATE.towerState.isActive = false;
@@ -916,17 +1022,17 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.towerInitialControls.classList.remove('hidden');
         UI.towerCashoutControls.classList.add('hidden');
         UI.towerBetInput.disabled = false;
-        UI.towerMaxWinDisplay.textContent = 'Можливий виграш: 0 ⭐';
+        UI.towerMaxWinDisplay.textContent = 'Возможный выигрыш: 0 ⭐';
     }
 
     function startTowerGame() {
         const bet = parseInt(UI.towerBetInput.value);
         if (isNaN(bet) || bet < 15) {
-            showNotification("Мінімальна ставка 15 ⭐");
+            showNotification("Минимальная ставка 15 ⭐");
             return;
         }
         if (STATE.userBalance < bet) {
-            showNotification("Недостатньо коштів");
+            showNotification("Недостаточно средств");
             return;
         }
 
@@ -942,10 +1048,10 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.towerInitialControls.classList.add('hidden');
         UI.towerCashoutControls.classList.remove('hidden');
         UI.towerCashoutBtn.disabled = true;
-        UI.towerCashoutBtn.textContent = `Забрати 0 ⭐`;
+        UI.towerCashoutBtn.textContent = `Забрать 0 ⭐`;
 
         const maxWin = STATE.towerState.payouts[STATE.towerState.payouts.length - 1];
-        UI.towerMaxWinDisplay.textContent = `Можливий виграш: ${maxWin.toLocaleString('ru-RU')} ⭐`;
+        UI.towerMaxWinDisplay.textContent = `Возможный выигрыш: ${maxWin.toLocaleString('ru-RU')} ⭐`;
 
         renderTower();
     }
@@ -978,7 +1084,7 @@ document.addEventListener('DOMContentLoaded', function() {
                         cell.classList.add('safe');
                         cell.innerHTML = `<img src="images/diamond.png" alt="Win">`;
                     } else {
-                        cell.style.opacity = "0";
+                        // Оставляем пустой, чтобы не показывать бомбу на пройденных уровнях
                     }
                 }
                 rowEl.appendChild(cell);
@@ -993,7 +1099,7 @@ document.addEventListener('DOMContentLoaded', function() {
         STATE.towerState.isActive = false;
 
         const bombCol = STATE.towerState.grid[row];
-        const clickedRowEl = UI.towerGameBoard.children[row]; // Correct index
+        const clickedRowEl = UI.towerGameBoard.children[STATE.towerState.levels - 1 - row]; 
         const cells = clickedRowEl.querySelectorAll('.tower-cell');
 
         cells.forEach((c, c_index) => {
@@ -1013,7 +1119,7 @@ document.addEventListener('DOMContentLoaded', function() {
             STATE.towerState.currentLevel++;
             const cashoutAmount = STATE.towerState.payouts[STATE.towerState.currentLevel - 1];
 
-            UI.towerCashoutBtn.textContent = `Забрати ${cashoutAmount.toLocaleString('ru-RU')} ⭐`;
+            UI.towerCashoutBtn.textContent = `Забрать ${cashoutAmount.toLocaleString('ru-RU')} ⭐`;
             UI.towerCashoutBtn.disabled = false;
 
             if (STATE.towerState.currentLevel === STATE.towerState.levels) {
@@ -1035,11 +1141,11 @@ document.addEventListener('DOMContentLoaded', function() {
             winAmount = STATE.towerState.payouts[STATE.towerState.currentLevel - 1];
             STATE.userBalance += winAmount;
             updateBalanceDisplay();
-            showNotification(`Виграш ${winAmount.toLocaleString('ru-RU')} ⭐ зараховано!`);
+            showNotification(`Выигрыш ${winAmount.toLocaleString('ru-RU')} ⭐ зачислен!`);
         } else {
-            showNotification("Ви програли! Ставка згоріла.");
+            showNotification("Вы проиграли! Ставка сгорела.");
             for(let i = STATE.towerState.currentLevel; i < STATE.towerState.levels; i++) {
-                const rowEl = UI.towerGameBoard.children[i];
+                const rowEl = UI.towerGameBoard.children[STATE.towerState.levels - 1 - i];
                  if(rowEl) {
                     const bombCell = rowEl.querySelector(`.tower-cell[data-col="${STATE.towerState.grid[i]}"]`);
                     if(bombCell && !bombCell.classList.contains('safe') && !bombCell.classList.contains('danger')) {
@@ -1055,41 +1161,40 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function cashoutTower() {
         if (STATE.towerState.currentLevel === 0 || STATE.towerState.isCashingOut) return;
-
         STATE.towerState.isCashingOut = true;
         endTowerGame(true);
     }
-    // --- КІНЕЦЬ ЛОГІКИ ВЕЖІ ---
+    // --- КОНЕЦ ЛОГИКИ БАШНИ ---
 
-    // --- ЛОГІКА ОРЛА І РЕШКИ ---
+    // --- ЛОГИКА ОРЛА И РЕШКИ ---
     function handleCoinflip(playerChoice) {
         if (!UI.coin || STATE.coinflipState.isFlipping) return;
         
         const bet = parseInt(UI.coinflipBetInput.value);
         if (isNaN(bet) || bet <= 0) {
-            showNotification("Некоректна ставка");
+            showNotification("Некорректная ставка");
             return;
         }
         if (STATE.userBalance < bet) {
-            showNotification("Недостатньо коштів");
+            showNotification("Недостаточно средств");
             return;
         }
 
         STATE.coinflipState.isFlipping = true;
         UI.coinflipResult.textContent = '';
-        STATE.userBalance -= bet; // Одразу списуємо ставку
+        STATE.userBalance -= bet;
         updateBalanceDisplay();
 
         const result = Math.random() < 0.5 ? 'heads' : 'tails';
 
         const handleFlipEnd = () => {
             if (playerChoice === result) {
-                STATE.userBalance += bet * 2; // Повертаємо ставку + виграш
-                UI.coinflipResult.textContent = `Ви виграли ${bet} ⭐!`;
-                showNotification(`Перемога!`);
+                STATE.userBalance += bet * 2;
+                UI.coinflipResult.textContent = `Вы выиграли ${bet} ⭐!`;
+                showNotification(`Победа!`);
             } else {
-                UI.coinflipResult.textContent = `Ви програли ${bet} ⭐.`;
-                showNotification(`Програш!`);
+                UI.coinflipResult.textContent = `Вы проиграли ${bet} ⭐.`;
+                showNotification(`Проигрыш!`);
             }
             updateBalanceDisplay();
             STATE.coinflipState.isFlipping = false;
@@ -1117,19 +1222,19 @@ document.addEventListener('DOMContentLoaded', function() {
             UI.coin.style.transform = `rotateY(${baseRotation + fullSpins + 180}deg)`;
         }
     }
-    // --- КІНЕЦЬ ЛОГІКИ ОРЛА І РЕШКИ ---
+    // --- КОНЕЦ ЛОГИКИ ОРЛА И РЕШКИ ---
 
-    // --- ЛОГІКА КАМІНЬ-НОЖИЦІ-ПАПІР ---
+    // --- ЛОГИКА КАМЕНЬ-НОЖНИЦЫ-БУМАГА ---
     function handleRps(playerChoice) {
         if (!UI.rpsComputerChoice || STATE.rpsState.isPlaying) return;
 
         const bet = parseInt(UI.rpsBetInput.value);
         if (isNaN(bet) || bet <= 0) {
-            showNotification("Некоректна ставка");
+            showNotification("Некорректная ставка");
             return;
         }
         if (STATE.userBalance < bet) {
-            showNotification("Недостатньо коштів");
+            showNotification("Недостаточно средств");
             return;
         }
 
@@ -1146,12 +1251,13 @@ document.addEventListener('DOMContentLoaded', function() {
             return STATE.rpsState.choiceMap[symbolKey];
         });
 
-        UI.rpsComputerChoice.innerHTML = '';
+        const track = UI.rpsComputerChoice.querySelector('.rps-roulette-track');
+        track.innerHTML = '';
         reel.forEach(symbol => {
             const itemEl = document.createElement('div');
             itemEl.classList.add('rps-roulette-item');
             itemEl.textContent = symbol;
-            UI.rpsComputerChoice.appendChild(itemEl);
+            track.appendChild(itemEl);
         });
 
         const itemWidth = 120, itemMargin = 5, totalItemWidth = itemWidth + (itemMargin * 2);
@@ -1160,19 +1266,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const onSpinEnd = () => {
             let resultMessage = '';
             if (playerChoice === computerChoice) {
-                resultMessage = "Нічия!";
+                resultMessage = "Ничья!";
+                STATE.userBalance += bet; // Возвращаем ставку
             } else if (
                 (playerChoice === 'rock' && computerChoice === 'scissors') ||
                 (playerChoice === 'paper' && computerChoice === 'rock') ||
                 (playerChoice === 'scissors' && computerChoice === 'paper')
             ) {
-                resultMessage = `Ви виграли ${bet} ⭐!`;
-                STATE.userBalance += bet;
-                showNotification(`Перемога!`);
+                resultMessage = `Вы выиграли ${bet} ⭐!`;
+                STATE.userBalance += bet * 2;
+                showNotification(`Победа!`);
             } else {
-                resultMessage = `Ви програли ${bet} ⭐.`;
-                STATE.userBalance -= bet;
-                showNotification(`Програш!`);
+                resultMessage = `Вы проиграли ${bet} ⭐.`;
+                showNotification(`Проигрыш!`);
             }
 
             UI.rpsResultMessage.textContent = resultMessage;
@@ -1184,40 +1290,46 @@ document.addEventListener('DOMContentLoaded', function() {
             }, 1500);
         };
 
-        UI.rpsComputerChoice.addEventListener('transitionend', onSpinEnd, { once: true });
+        track.addEventListener('transitionend', onSpinEnd, { once: true });
 
-        UI.rpsComputerChoice.style.transition = 'none';
-        UI.rpsComputerChoice.style.left = '0px';
-        UI.rpsComputerChoice.getBoundingClientRect();
-        UI.rpsComputerChoice.style.transition = 'left 6s cubic-bezier(0.2, 0.8, 0.2, 1)';
-        UI.rpsComputerChoice.style.left = `calc(50% - ${targetPosition}px)`;
+        track.style.transition = 'none';
+        track.style.left = '0px';
+        track.getBoundingClientRect();
+        track.style.transition = 'left 6s cubic-bezier(0.2, 0.8, 0.2, 1)';
+        track.style.left = `calc(50% - ${targetPosition}px)`;
     }
-    // --- КІНЕЦЬ ЛОГІКИ КАМІНЬ-НОЖИЦІ-ПАПІР ---
+    // --- КОНЕЦ ЛОГИКИ КАМЕНЬ-НОЖНИЦЫ-БУМАГА ---
 
 
-    // --- ЗАВАНТАЖЕННЯ ДАНИХ З СЕРВЕРА ---
+    // --- ЗАГРУЗКА ДАННЫХ С СЕРВЕРА ---
     async function loadInitialData() {
+        if (!STATE.user) {
+            console.error("Пользователь не аутентифицирован. Загрузка данных отменена.");
+            return;
+        }
         try {
-            const [caseResponse, settingsResponse] = await Promise.all([
-                fetch('/api/case/items'), // Використовуємо публічний маршрут
-                fetch('/api/game_settings')
+            const [caseResponse, settingsResponse, contestResponse] = await Promise.all([
+                fetch('/api/case/items'),
+                fetch('/api/game_settings'),
+                fetch(`/api/contest/current?telegram_id=${STATE.user.telegram_id}`)
             ]);
 
-            if (!caseResponse.ok) throw new Error(`Помилка завантаження кейсів: ${caseResponse.status}`);
-            if (!settingsResponse.ok) throw new Error(`Помилка завантаження налаштувань: ${settingsResponse.status}`);
-
-            const caseItems = await caseResponse.json();
-            STATE.possibleItems = caseItems;
-
-            const settings = await settingsResponse.json();
-            STATE.gameSettings = settings;
+            if (!caseResponse.ok) throw new Error(`Ошибка загрузки кейсов: ${caseResponse.status}`);
+            if (!settingsResponse.ok) throw new Error(`Ошибка загрузки настроек: ${settingsResponse.status}`);
+            if (!contestResponse.ok) throw new Error(`Ошибка загрузки конкурса: ${contestResponse.status}`);
+            
+            STATE.possibleItems = await caseResponse.json();
+            STATE.gameSettings = await settingsResponse.json();
+            STATE.contest = await contestResponse.json();
 
             applyGameSettings();
             populateCasePreview();
+            updateContestUI();
+            setupTimer();
 
         } catch (error) {
-            console.error('Не вдалося завантажити дані з сервера:', error);
-            showNotification("Помилка завантаження даних з сервера.");
+            console.error('Не удалось загрузить данные с сервера:', error);
+            showNotification("Ошибка загрузки данных с сервера.");
         }
     }
 
@@ -1235,14 +1347,14 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.gameMenuBtns.forEach(btn => {
             const view = btn.dataset.view;
             if (gameButtons.hasOwnProperty(view)) {
-                btn.style.display = (gameButtons[view] === 'false') ? 'none' : 'flex';
+                btn.style.display = (gameButtons[view] === 'false') ? 'none' : '';
             }
         });
     }
 
-    // --- ІНІЦІАЛІЗАЦІЯ ---
+    // --- ИНИЦИАЛИЗАЦИЯ ---
     function init() {
-        // Пошук всіх елементів DOM
+        // Поиск всех элементов DOM
         const selectors = {
             notificationToast: '#notification-toast', userBalanceElement: '#user-balance',
             views: '.view', navButtons: '.nav-btn', caseView: '#case-view', spinView: '#spin-view',
@@ -1257,9 +1369,7 @@ document.addEventListener('DOMContentLoaded', function() {
             profileContents: '.profile-tab-content', profilePhoto: '#profile-photo',
             profileName: '#profile-name', profileId: '#profile-id',
             inviteFriendBtn: '#invite-friend-btn', copyLinkBtn: '#copy-link-btn',
-            contestTimer: '#contest-timer', buyTicketBtn: '#buy-ticket-btn',
-            ticketQuantityInput: '#ticket-quantity-input', ticketQuantityPlus: '#ticket-quantity-plus',
-            ticketQuantityMinus: '#ticket-quantity-minus', userTicketsDisplay: '#user-tickets-display',
+            contestsView: '#contests-view', contestCard: '.contest-card',
             upgradeWheel: '#upgrade-wheel', upgradePointer: '#upgrade-pointer',
             upgradeChanceDisplay: '#upgrade-chance-display', upgradeMultiplierDisplay: '#upgrade-multiplier-display',
             yourItemSlot: '#your-item-slot', desiredItemSlot: '#desired-item-slot',
@@ -1271,7 +1381,7 @@ document.addEventListener('DOMContentLoaded', function() {
             minerInfoWrapper: '.miner-info-wrapper', coin: '#coin',
             coinflipResult: '#coinflip-result-message', coinflipBetInput: '#coinflip-bet-input',
             coinflipHeadsBtn: '#coinflip-heads-btn', coinflipTailsBtn: '#coinflip-tails-btn',
-            rpsPlayerChoice: '#rps-player-choice', rpsComputerChoice: '#rps-computer-choice',
+            rpsPlayerChoice: '#rps-player-choice', rpsComputerChoice: '.rps-spinner-container',
             rpsResultMessage: '#rps-result-message', rpsBetInput: '#rps-bet-input',
             rpsButtons: '.rps-buttons .primary-button', slotsTrack1: '#slots-track-1',
             slotsTrack2: '#slots-track-2', slotsTrack3: '#slots-track-3',
@@ -1289,11 +1399,11 @@ document.addEventListener('DOMContentLoaded', function() {
             } else if (elements.length === 1) {
                 UI[key] = elements[0];
             } else {
-                UI[key] = null; // Якщо елемент не знайдено, встановлюємо null
+                UI[key] = null;
             }
         }
 
-        // Призначення обробників подій
+        // Назначение обработчиков событий
         if (UI.caseImageBtn) UI.caseImageBtn.addEventListener('click', handleCaseClick);
         if (UI.startSpinBtn) UI.startSpinBtn.addEventListener('click', startSpinProcess);
         if (UI.quantitySelector) UI.quantitySelector.addEventListener('click', handleQuantityChange);
@@ -1301,9 +1411,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (UI.navButtons) UI.navButtons.forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
         if (UI.inviteFriendBtn) UI.inviteFriendBtn.addEventListener('click', inviteFriend);
         if (UI.copyLinkBtn) UI.copyLinkBtn.addEventListener('click', copyInviteLink);
-        if (UI.buyTicketBtn) UI.buyTicketBtn.addEventListener('click', buyTickets);
-        if (UI.ticketQuantityPlus) UI.ticketQuantityPlus.addEventListener('click', () => handleTicketQuantityChange(1));
-        if (UI.ticketQuantityMinus) UI.ticketQuantityMinus.addEventListener('click', () => handleTicketQuantityChange(-1));
+        
         if (UI.profileTabs) UI.profileTabs.forEach(tab => tab.addEventListener('click', function () {
             UI.profileTabs.forEach(t => t.classList.remove('active'));
             UI.profileContents.forEach(c => c.classList.remove('active'));
@@ -1338,18 +1446,15 @@ document.addEventListener('DOMContentLoaded', function() {
         if (UI.coinflipTailsBtn) UI.coinflipTailsBtn.addEventListener('click', () => handleCoinflip('tails'));
         if (UI.rpsButtons) UI.rpsButtons.forEach(button => button.addEventListener('click', () => handleRps(button.dataset.choice)));
 
-        // Початковий стан додатку
+        // Начальное состояние приложения
         loadTelegramData();
-        loadInitialData();
-        updateBalanceDisplay();
         switchView('game-view');
-        setInterval(updateTimer, 1000);
     }
     
     try {
         init();
     } catch (error) {
-        console.error("Критична помилка при ініціалізації:", error);
-        document.body.innerHTML = `<div style="color: white; padding: 20px;">Сталася критична помилка: ${error.message}. Будь ласка, перевірте консоль (F12) для деталей.</div>`;
+        console.error("Критическая ошибка при инициализации:", error);
+        document.body.innerHTML = `<div style="color: white; padding: 20px;">Произошла критическая ошибка: ${error.message}. Пожалуйста, проверьте консоль (F12) для деталей.</div>`;
     }
 });
