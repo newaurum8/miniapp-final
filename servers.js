@@ -10,13 +10,18 @@ app.use(cors());
 app.use(express.json());
 
 // --- ВІДДАЧА СТАТИЧНИХ ФАЙЛІВ ---
-const miniappPath = path.join(__dirname, ''); // Шлях до поточної папки, де лежить servers.js
 
-console.log(`[Server] Поточна робоча директорія: ${__dirname}`);
-console.log(`[Server] Шлях до статичних файлів: ${miniappPath}`);
+// Цей рядок робить доступними файли з поточної папки (css, js, images)
+app.use(express.static(__dirname));
 
-app.use(express.static(miniappPath));
+// Цей рядок робить доступною папку адмін-панелі за адресою /admin
 app.use('/admin', express.static(path.join(__dirname, 'admin')));
+
+// Явно вказуємо, що на головній сторінці потрібно віддавати index.html
+// ЦЕ ВИРІШУЄ ПОМИЛКУ "CANNOT GET /" НА ХОСТИНГУ
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
 
 // Підключення до БД
@@ -173,7 +178,6 @@ app.post('/api/admin/case/items', (req, res) => {
             itemIds.forEach(itemId => {
                 stmt.run(caseId, itemId, (err) => {
                     if (err) {
-                        // Помилку треба обробляти всередині циклу, інакше вона не буде спіймана
                         console.error("Error inserting item:", err);
                     }
                 });
@@ -201,12 +205,20 @@ app.get('/api/admin/case/items_full', (req, res) => {
     const sql = `
         SELECT i.id, i.name, i.imageSrc, i.value
         FROM items i
-        JOIN case_items ci ON i.id = ci.item_id
-        WHERE ci.case_id = 1
+        LEFT JOIN case_items ci ON i.id = ci.item_id
+        WHERE ci.case_id = 1 OR (SELECT COUNT(*) FROM case_items) = 0
     `;
     db.all(sql, [], (err, rows) => {
         if (err) return res.status(500).json({ error: err.message });
-        res.json(rows);
+        // Якщо кейс порожній, віддаємо всі предмети
+        if (rows.length > 0) {
+            res.json(rows);
+        } else {
+            db.all("SELECT * FROM items ORDER BY value DESC", [], (err, allItems) => {
+                if (err) return res.status(500).json({ error: err.message });
+                res.json(allItems);
+            });
+        }
     });
 });
 
@@ -243,6 +255,6 @@ app.post('/api/admin/game_settings', (req, res) => {
 
 app.listen(port, () => {
     console.log(`Сервер успішно запущен на порту ${port}`);
-    console.log(`Основний додаток: http://localhost:${port}/index.html`);
+    console.log(`Основний додаток: http://localhost:${port}`);
     console.log(`Адмін-панель: http://localhost:${port}/admin/admin.html`);
 });
