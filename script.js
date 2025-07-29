@@ -216,10 +216,10 @@ document.addEventListener('DOMContentLoaded', function() {
             view.classList.remove('active');
         });
         UI.navButtons.forEach(btn => btn.classList.remove('active'));
-    
+
         const viewToShow = document.getElementById(viewId);
         let btnToActivate;
-    
+
         if (viewToShow) {
             viewToShow.classList.add('active');
             // Если это один из экранов игр, активируем кнопку "Игры"
@@ -230,33 +230,34 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         } else {
             // Фоллбэк на главный экран, если view не найдена
+            console.error(`Экран с ID "${viewId}" не найден.`);
             document.getElementById('game-view').classList.add('active');
             btnToActivate = document.querySelector('.nav-btn[data-view="game-view"]');
         }
-    
+
         if (btnToActivate) {
             btnToActivate.classList.add('active');
         }
-    
+
         // Управление кнопкой "Назад" в Telegram
         if (window.Telegram && window.Telegram.WebApp) {
             const tg = window.Telegram.WebApp;
             tg.BackButton.offClick(); // Сбрасываем старый обработчик
-    
+
             const isGameScreen = ['upgrade-view', 'miner-view', 'coinflip-view', 'rps-view', 'slots-view', 'tower-view'].includes(viewId);
             const isMainMenuScreen = ['games-menu-view', 'contests-view', 'friends-view', 'profile-view'].includes(viewId);
-            
+
             if (isGameScreen) {
                 tg.BackButton.show();
                 tg.BackButton.onClick(() => switchView('games-menu-view'));
             } else if (isMainMenuScreen) {
-                 tg.BackButton.show();
-                 tg.BackButton.onClick(() => switchView('game-view'));
+                tg.BackButton.show();
+                tg.BackButton.onClick(() => switchView('game-view'));
             } else {
                 tg.BackButton.hide();
             }
         }
-    
+
         // Действия при переключении на определенные экраны
         if (viewId === 'profile-view') {
             loadUserInventory();
@@ -1535,9 +1536,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
         for (const key in selectors) {
             const elements = document.querySelectorAll(selectors[key]);
-            UI[key] = elements.length > 1 ? Array.from(elements) : elements[0];
+            if (elements.length > 1) {
+                UI[key] = Array.from(elements);
+            } else if (elements.length === 1) {
+                UI[key] = elements[0];
+            } else {
+                UI[key] = null; // Явно указываем, что элемент не найден
+                console.warn(`Элемент с селектором "${selectors[key]}" не найден.`);
+            }
         }
 
+
+        // Назначение обработчиков событий
         if (UI.caseImageBtn) UI.caseImageBtn.addEventListener('click', handleCaseClick);
         if (UI.startSpinBtn) UI.startSpinBtn.addEventListener('click', startSpinProcess);
         if (UI.quantitySelector) UI.quantitySelector.addEventListener('click', handleQuantityChange);
@@ -1548,11 +1558,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
         if (UI.profileTabs) UI.profileTabs.forEach(tab => tab.addEventListener('click', function() {
             const parentTabs = this.closest('.profile-tabs');
-            parentTabs.querySelectorAll('.profile-tab-btn').forEach(t => t.classList.remove('active'));
+            if (parentTabs) {
+                parentTabs.querySelectorAll('.profile-tab-btn').forEach(t => t.classList.remove('active'));
+            }
             this.classList.add('active');
+            
             const contentId = this.dataset.tab + '-content';
             const parentContent = parentTabs.nextElementSibling;
-            if(parentContent && parentContent.classList.contains('profile-content')){
+            if (parentContent && parentContent.classList.contains('profile-content')) {
                 parentContent.querySelectorAll('.profile-tab-content').forEach(c => c.classList.remove('active'));
                 const contentEl = parentContent.querySelector('#' + contentId);
                 if (contentEl) contentEl.classList.add('active');
