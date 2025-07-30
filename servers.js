@@ -1,21 +1,20 @@
 const express = require('express');
-const { Pool } = require('pg'); // Используем pg вместо sqlite3
+const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
-// ВАЖНО: Убедитесь, что вы используете строку подключения из "Transaction pooler"
-const connectionString = 'postgres://postgres.[ID_ПРОЕКТА]:[ВАШ_ПАРОЛЬ]@aws-0-eu-central-1.pooler.supabase.com:6543/postgres';
+// Ваша строка подключения к базе данных Supabase
+const connectionString = 'postgresql://postgres.bxywovqpkmzxyswrwtul:[qwerty312018]@aws-0-eu-central-1.pooler.supabase.com:5432/postgres';
 
 const pool = new Pool({
     connectionString: connectionString,
     ssl: {
-        rejectUnauthorized: false // <-- ЭТО ИСПРАВЛЕНИЕ
+        rejectUnauthorized: false // Важная настройка для Render
     }
 });
-
 
 app.use(cors());
 app.use(express.json());
@@ -69,7 +68,6 @@ async function initializeDb() {
             );
         `);
 
-        // Добавляем предметы, если их еще нет
         const items = [
             { id: 1, name: 'Cigar', imageSrc: 'images/item.png', value: 3170 },
             { id: 2, name: 'Bear', imageSrc: 'images/item1.png', value: 440 },
@@ -125,7 +123,6 @@ async function initializeDb() {
             );
         }
 
-
         await client.query(`
             CREATE TABLE IF NOT EXISTS contests (
                 id SERIAL PRIMARY KEY,
@@ -153,7 +150,6 @@ async function initializeDb() {
         client.release();
     }
 }
-
 
 // --- API Маршруты (клиентские) ---
 
@@ -523,10 +519,9 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
     }
 });
 
-
 app.listen(port, () => {
     console.log(`Сервер успешно запущен на порту ${port}`);
     console.log(`Основной додаток: http://localhost:${port}`);
     console.log(`Админ-панель: http://localhost:${port}/admin?secret=${ADMIN_SECRET}`);
-    initializeDb(); // Запускаем инициализацию после старта сервера
+    initializeDb();
 });
