@@ -25,8 +25,6 @@ const checkAdminSecret = (req, res, next) => {
     }
 };
 
-app.use('/api/admin', checkAdminSecret);
-
 // --- ОСНОВНЫЕ МАРШРУТЫ ---
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
@@ -38,7 +36,8 @@ app.get('/admin', checkAdminSecret, (req, res) => {
 
 // Подключение к БД
 const dataDir = process.env.RENDER_DISK_MOUNT_PATH || __dirname;
-const dbPath = path.join(dataDir, 'database.sqlite');
+// ИЗМЕНЕНИЕ: Указываем правильный путь к базе данных
+const dbPath = path.join(dataDir, 'miniapp', 'database.sqlite');
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error("Ошибка при подключении к БД:", err.message);
@@ -134,6 +133,27 @@ function initializeDb() {
 }
 
 // --- API Маршруты (клиентские) ---
+
+app.get('/api/case/items_full', (req, res) => {
+    const sql = `
+        SELECT i.id, i.name, i.imageSrc, i.value
+        FROM items i
+        LEFT JOIN case_items ci ON i.id = ci.item_id
+        WHERE ci.case_id = 1 OR (SELECT COUNT(*) FROM case_items) = 0
+    `;
+    db.all(sql, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (rows.length > 0) {
+            res.json(rows);
+        } else {
+            db.all("SELECT * FROM items ORDER BY value DESC", [], (err, allItems) => {
+                if (err) return res.status(500).json({ error: err.message });
+                res.json(allItems);
+            });
+        }
+    });
+});
+
 
 app.post('/api/user/get-or-create', (req, res) => {
     const { telegram_id, username } = req.body;
@@ -291,10 +311,7 @@ app.get('/api/contest/current', (req, res) => {
 
         try {
             const ticketCount = await new Promise((resolve, reject) => {
-                db.get("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = ?", [contest.id], (err, row) => {
-                    if (err) return reject(err);
-                    resolve(row || { count: 0, participants: 0 });
-                });
+                db.get("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = ?", [contest.id], (err, row) => err ? reject(err) : resolve(row));
             });
 
             const { telegram_id } = req.query;
@@ -358,6 +375,8 @@ app.post('/api/contest/buy-ticket', (req, res) => {
 
 
 // --- API Маршруты (админские) ---
+app.use('/api/admin', checkAdminSecret);
+
 
 app.get('/api/admin/users', (req, res) => {
     db.all("SELECT id, telegram_id, username, balance FROM users ORDER BY id DESC", [], (err, rows) => {
