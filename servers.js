@@ -6,11 +6,14 @@ const path = require('path');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Ваша строка подключения к базе данных Supabase                                                                                
-const connectionString = 'postgresql://postgres.bxywovqpkmzxyswrwtul:[qwerty312018]@aws-0-eu-central-1.pooler.supabase.com:6543/postgres';
+// ВАЖНО: Убедитесь, что вы используете строку подключения из "Transaction pooler"
+const connectionString = 'postgres://postgres.[ID_ПРОЕКТА]:[ВАШ_ПАРОЛЬ]@aws-0-eu-central-1.pooler.supabase.com:6543/postgres';
 
 const pool = new Pool({
     connectionString: connectionString,
+    ssl: {
+        rejectUnauthorized: false // <-- ЭТО ИСПРАВЛЕНИЕ
+    }
 });
 
 
@@ -61,7 +64,7 @@ async function initializeDb() {
             CREATE TABLE IF NOT EXISTS items (
                 id SERIAL PRIMARY KEY,
                 name TEXT NOT NULL,
-                imageSrc TEXT,
+                "imageSrc" TEXT,
                 value INTEGER NOT NULL
             );
         `);
@@ -78,7 +81,7 @@ async function initializeDb() {
 
         for (const item of items) {
             await client.query(
-                `INSERT INTO items (id, name, imageSrc, value) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING;`,
+                `INSERT INTO items (id, name, "imageSrc", value) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING;`,
                 [item.id, item.name, item.imageSrc, item.value]
             );
         }
@@ -183,7 +186,7 @@ app.get('/api/user/inventory', async (req, res) => {
     }
 
     const sql = `
-        SELECT ui.id AS "uniqueId", i.id, i.name, i."imagesrc", i.value
+        SELECT ui.id AS "uniqueId", i.id, i.name, i."imageSrc", i.value
         FROM user_inventory ui
         JOIN items i ON ui.item_id = i.id
         WHERE ui.user_id = $1
@@ -205,7 +208,7 @@ app.post('/api/user/inventory/sell', async (req, res) => {
     try {
         await client.query('BEGIN');
         const itemResult = await client.query(
-            "SELECT i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.id = $1 AND ui.user_id = $2", 
+            'SELECT i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.id = $1 AND ui.user_id = $2', 
             [unique_id, user_id]
         );
         if (itemResult.rows.length === 0) {
@@ -233,7 +236,7 @@ app.post('/api/user/inventory/sell', async (req, res) => {
 app.get('/api/case/items_full', async (req, res) => {
     try {
         const sql = `
-            SELECT i.id, i.name, i."imagesrc", i.value
+            SELECT i.id, i.name, i."imageSrc", i.value
             FROM items i
             LEFT JOIN case_items ci ON i.id = ci.item_id
             WHERE ci.case_id = 1 OR (SELECT COUNT(*) FROM case_items) = 0
@@ -243,7 +246,7 @@ app.get('/api/case/items_full', async (req, res) => {
         if (rows.length > 0) {
             res.json(rows);
         } else {
-            const allItemsResult = await pool.query('SELECT id, name, "imagesrc", value FROM items ORDER BY value DESC');
+            const allItemsResult = await pool.query('SELECT id, name, "imageSrc", value FROM items ORDER BY value DESC');
             res.json(allItemsResult.rows);
         }
     } catch (err) {
@@ -270,7 +273,7 @@ app.post('/api/case/open', async (req, res) => {
 
         if (user.balance < totalCost) throw new Error('Недостаточно средств');
 
-        const caseItemsResult = await client.query('SELECT i.id, i.name, i."imagesrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
+        const caseItemsResult = await client.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
         if (caseItemsResult.rows.length === 0) throw new Error('Кейс пуст');
         const caseItems = caseItemsResult.rows;
 
@@ -307,7 +310,7 @@ app.get('/api/game_settings', async (req, res) => {
 app.get('/api/contest/current', async (req, res) => {
     const now = Date.now();
     const sql = `
-        SELECT c.id, c.end_time, c.ticket_price, c.winner_id, i.name AS "itemName", i."imagesrc" AS "itemImageSrc"
+        SELECT c.id, c.end_time, c.ticket_price, c.winner_id, i.name AS "itemName", i."imageSrc" AS "itemImageSrc"
         FROM contests c
         JOIN items i ON c.item_id = i.id
         WHERE c.is_active = TRUE AND c.end_time > $1
@@ -326,7 +329,7 @@ app.get('/api/contest/current', async (req, res) => {
         let userTickets = 0;
         if (telegram_id) {
             const userTicketsResult = await pool.query("SELECT COUNT(*) AS count FROM user_tickets WHERE contest_id = $1 AND telegram_id = $2", [contest.id, telegram_id]);
-            userTickets = userTicketsResult.rows[0].count;
+            userTickets = Number(userTicketsResult.rows[0].count);
         }
 
         res.json({ ...contest, ...ticketCount, userTickets });
@@ -402,7 +405,7 @@ app.post('/api/admin/user/balance', async (req, res) => {
 
 app.get('/api/admin/items', async (req, res) => {
     try {
-        const { rows } = await pool.query('SELECT id, name, "imagesrc", value FROM items ORDER BY value DESC');
+        const { rows } = await pool.query('SELECT id, name, "imageSrc", value FROM items ORDER BY value DESC');
         res.json(rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
