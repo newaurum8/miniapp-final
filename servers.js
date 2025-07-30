@@ -135,7 +135,7 @@ async function initializeDb() {
                 ticket_price INTEGER NOT NULL,
                 end_time BIGINT NOT NULL,
                 is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                winner_id INTEGER
+                winner_id INTEGER REFERENCES users(id)
             );
         `);
 
