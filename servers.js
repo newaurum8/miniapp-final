@@ -6,8 +6,8 @@ const path = require('path');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Ваша строка подключения к базе данных Supabase
-const connectionString = 'postgresql://postgres:[qwerty312018]@db.bxywovqpkmzxyswrwtul.supabase.co:5432/postgres';
+// Ваша строка подключения к базе данных Supabase                                                                                
+const connectionString = 'postgresql://postgres.bxywovqpkmzxyswrwtul:[qwerty312018]@aws-0-eu-central-1.pooler.supabase.com:6543/postgres';
 
 const pool = new Pool({
     connectionString: connectionString,
