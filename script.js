@@ -1218,7 +1218,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadInitialData() {
         try {
             const [caseResponse, settingsResponse] = await Promise.all([
-                fetch('/api/admin/case/items_full'),
+                fetch('/api/case/items_full'),
                 fetch('/api/game_settings')
             ]);
 
