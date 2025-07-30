@@ -6,13 +6,18 @@ const path = require('path');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Ваша строка подключения к базе данных Supabase
-const connectionString = 'postgresql://postgres.bxywovqpkmzxyswrwtul:[qwerty312018]@aws-0-eu-central-1.pooler.supabase.com:5432/postgres';
+// Используем переменную окружения для строки подключения
+const connectionString = process.env.DATABASE_URL;
+
+if (!connectionString) {
+    console.error('Ошибка: Переменная окружения DATABASE_URL не установлена!');
+    process.exit(1);
+}
 
 const pool = new Pool({
     connectionString: connectionString,
     ssl: {
-        rejectUnauthorized: false // Важная настройка для Render
+        rejectUnauthorized: false // Важная настройка для Render и Supabase
     }
 });
 
@@ -151,6 +156,7 @@ async function initializeDb() {
     }
 }
 
+// ... (весь остальной код API маршрутов остается без изменений) ...
 // --- API Маршруты (клиентские) ---
 
 app.post('/api/user/get-or-create', async (req, res) => {
@@ -518,6 +524,7 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
         client.release();
     }
 });
+
 
 app.listen(port, () => {
     console.log(`Сервер успешно запущен на порту ${port}`);
