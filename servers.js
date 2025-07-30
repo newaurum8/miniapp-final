@@ -13,7 +13,6 @@ app.use(express.json());
 app.use(express.static(__dirname));
 app.use('/admin', express.static(path.join(__dirname, 'admin')));
 
-
 // --- ЗАЩИТА АДМИН-ПАНЕЛИ ---
 const ADMIN_SECRET = 'Aurum'; // <-- ЗАМЕНИТЕ ЭТО НА ВАШ СОБСТВЕННЫЙ УНИКАЛЬНЫЙ КЛЮЧ
 
@@ -25,6 +24,8 @@ const checkAdminSecret = (req, res, next) => {
         res.status(403).send('Доступ запрещен');
     }
 };
+
+app.use('/api/admin', checkAdminSecret);
 
 // --- ОСНОВНЫЕ МАРШРУТЫ ---
 app.get('/', (req, res) => {
@@ -133,28 +134,6 @@ function initializeDb() {
 }
 
 // --- API Маршруты (клиентские) ---
-
-// ИЗМЕНЕНИЕ: Маршрут вынесен из-под защиты и переименован
-app.get('/api/case/items_full', (req, res) => {
-    const sql = `
-        SELECT i.id, i.name, i.imageSrc, i.value
-        FROM items i
-        LEFT JOIN case_items ci ON i.id = ci.item_id
-        WHERE ci.case_id = 1 OR (SELECT COUNT(*) FROM case_items) = 0
-    `;
-    db.all(sql, [], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (rows.length > 0) {
-            res.json(rows);
-        } else {
-            db.all("SELECT * FROM items ORDER BY value DESC", [], (err, allItems) => {
-                if (err) return res.status(500).json({ error: err.message });
-                res.json(allItems);
-            });
-        }
-    });
-});
-
 
 app.post('/api/user/get-or-create', (req, res) => {
     const { telegram_id, username } = req.body;
@@ -312,7 +291,10 @@ app.get('/api/contest/current', (req, res) => {
 
         try {
             const ticketCount = await new Promise((resolve, reject) => {
-                db.get("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = ?", [contest.id], (err, row) => err ? reject(err) : resolve(row));
+                db.get("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = ?", [contest.id], (err, row) => {
+                    if (err) return reject(err);
+                    resolve(row || { count: 0, participants: 0 });
+                });
             });
 
             const { telegram_id } = req.query;
@@ -376,8 +358,6 @@ app.post('/api/contest/buy-ticket', (req, res) => {
 
 
 // --- API Маршруты (админские) ---
-app.use('/api/admin', checkAdminSecret);
-
 
 app.get('/api/admin/users', (req, res) => {
     db.all("SELECT id, telegram_id, username, balance FROM users ORDER BY id DESC", [], (err, rows) => {
