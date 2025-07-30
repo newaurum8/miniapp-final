@@ -193,9 +193,9 @@ document.addEventListener('DOMContentLoaded', () => {
     
     function renderCurrentContest() {
         if (currentContest) {
-            const endDate = new Date(currentContest.end_time).toLocaleString();
+            const endDate = new Date(Number(currentContest.end_time)).toLocaleString();
             contestDetailsP.innerHTML = `
-                <strong>Приз:</strong> ${currentContest.item_name} <br>
+                <strong>Приз:</strong> ${currentContest.itemName} <br>
                 <strong>Цена билета:</strong> ${currentContest.ticket_price} <br>
                 <strong>Завершение:</strong> ${endDate} <br>
                 <strong>Билетов куплено:</strong> ${currentContest.count} <br>
@@ -244,7 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if(result.success){
-                 alert(`Победитель определён! Telegram ID: ${result.winner_telegram_id}. Приз зачислен на баланс.`);
+                 alert(`Победитель определён! Telegram ID: ${result.winner_telegram_id}. Приз зачислен в инвентарь победителя.`);
             } else if (result.message) {
                  alert(result.message);
             }
