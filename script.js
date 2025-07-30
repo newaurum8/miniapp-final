@@ -1,7 +1,8 @@
 document.addEventListener('DOMContentLoaded', function() {
     // --- ГЛОБАЛЬНЫЙ СТАТУС ---
     const STATE = {
-        userBalance: 0, // Начальный баланс будет получен с сервера
+        user: null, // Для хранения данных пользователя, включая telegram_id
+        userBalance: 0,
         inventory: [],
         gameHistory: [],
         isSpinning: false,
@@ -9,10 +10,11 @@ document.addEventListener('DOMContentLoaded', function() {
         openQuantity: 1,
         casePrice: 100,
         lastWonItems: [],
-        contestTicketPrice: 100,
+        
+        // Contest State
+        contest: null, // Для хранения данных о текущем конкурсе
         ticketQuantity: 1,
-        userTickets: 0,
-        contestEndDate: new Date(Date.now() + 6 * 24 * 60 * 60 * 1000 + 15 * 60 * 60 * 1000),
+
         possibleItems: [],
         gameSettings: {}, // Для хранения настроек игр
         upgradeState: {
@@ -59,7 +61,7 @@ document.addEventListener('DOMContentLoaded', function() {
             grid: [],
             payouts: [],
             multipliers: [1.5, 2.5, 4, 8, 16],
-            nextLevelTimeout: null // Для отмены таймаута
+            nextLevelTimeout: null
         }
     };
 
@@ -88,8 +90,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!response.ok) throw new Error('Authentication failed');
 
             const userData = await response.json();
+            STATE.user = userData; // Сохраняем все данные пользователя
             STATE.userBalance = userData.balance;
             updateBalanceDisplay();
+            loadContestData(); // Загружаем данные о конкурсе после аутентификации
 
         } catch (error) {
             console.error("Ошибка аутентификации:", error);
@@ -113,7 +117,7 @@ document.addEventListener('DOMContentLoaded', function() {
                  console.warn("Данные пользователя Telegram не найдены. Работа в режиме гостя.");
                  if (UI.profileName) UI.profileName.textContent = "Guest";
                  if (UI.profileId) UI.profileId.textContent = "ID 0";
-                 STATE.userBalance = 1000; // Устанавливаем баланс по умолчанию для теста
+                 STATE.userBalance = 1000;
                  updateBalanceDisplay();
             }
         } catch (error) {
@@ -226,7 +230,7 @@ document.addEventListener('DOMContentLoaded', function() {
             resetUpgradeState(true);
         }
         if (viewId === 'contests-view') {
-            updateContestUI();
+            loadContestData(); // Обновляем данные при переходе на вкладку
         }
         if (viewId === 'miner-view') {
             resetMinerGame();
@@ -496,13 +500,37 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- ЛОГИКА КОНКУРСОВ ---
+    async function loadContestData() {
+        if (!STATE.user || !STATE.user.telegram_id) return;
+        try {
+            const response = await fetch(`/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
+            if (!response.ok) throw new Error('Network response was not ok');
+            const contestData = await response.json();
+            STATE.contest = contestData;
+            updateContestUI();
+        } catch (error) {
+            console.error("Не удалось загрузить данные о конкурсе:", error);
+        }
+    }
+    
     function updateContestUI() {
-        if (!UI.buyTicketBtn) return;
-        const totalCost = STATE.contestTicketPrice * STATE.ticketQuantity;
-        UI.buyTicketBtn.innerHTML = `Купить билет <span class="icon">⭐</span> ${totalCost.toLocaleString('ru-RU')}`;
-        UI.ticketQuantityInput.value = STATE.ticketQuantity;
-        UI.userTicketsDisplay.textContent = STATE.userTickets;
-        UI.buyTicketBtn.disabled = STATE.userBalance < totalCost;
+        if (!UI.buyTicketBtn || !STATE.contest) {
+            if (UI.contestCard) UI.contestCard.innerHTML = '<p>Активных конкурсов нет.</p>';
+            return;
+        }
+    
+        const { contest } = STATE;
+        const totalCost = contest.ticket_price * STATE.ticketQuantity;
+    
+        if (UI.contestItemImage) UI.contestItemImage.src = contest.itemImageSrc;
+        if (UI.contestItemName) UI.contestItemName.textContent = contest.itemName;
+        if (UI.userTicketsDisplay) UI.userTicketsDisplay.textContent = contest.userTickets || 0;
+        if (UI.contestParticipants) UI.contestParticipants.textContent = `👥 ${contest.participants || 0}`;
+        if (UI.buyTicketBtn) {
+            UI.buyTicketBtn.innerHTML = `Купить билет <span class="icon">⭐</span> ${totalCost.toLocaleString('ru-RU')}`;
+            UI.buyTicketBtn.disabled = STATE.userBalance < totalCost;
+        }
+        if (UI.ticketQuantityInput) UI.ticketQuantityInput.value = STATE.ticketQuantity;
     }
 
     function handleTicketQuantityChange(amount) {
@@ -513,28 +541,58 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function buyTickets() {
-        const totalCost = STATE.contestTicketPrice * STATE.ticketQuantity;
+    async function buyTickets() {
+        if (!STATE.contest || !STATE.user) {
+            showNotification('Ошибка: данные о конкурсе или пользователе не загружены.');
+            return;
+        }
+        const totalCost = STATE.contest.ticket_price * STATE.ticketQuantity;
         if (STATE.userBalance < totalCost) {
             showNotification('Недостаточно средств.');
             return;
         }
-        STATE.userBalance -= totalCost;
-        STATE.userTickets += STATE.ticketQuantity;
-        showNotification(`Вы успешно приобрели ${STATE.ticketQuantity} билет(ов)!`);
-        updateBalanceDisplay();
-        updateContestUI();
+        
+        try {
+            const response = await fetch('/api/contest/buy-ticket', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contest_id: STATE.contest.id,
+                    telegram_id: STATE.user.telegram_id,
+                    quantity: STATE.ticketQuantity
+                })
+            });
+            const result = await response.json();
+            if (!response.ok || !result.success) {
+                throw new Error(result.error || 'Не удалось купить билет');
+            }
+            
+            STATE.userBalance = result.newBalance;
+            updateBalanceDisplay();
+            showNotification(`Вы успешно приобрели ${STATE.ticketQuantity} билет(ов)!`);
+            
+            // Обновляем данные о конкурсе с сервера
+            await loadContestData();
+
+        } catch (error) {
+            console.error("Ошибка при покупке билета:", error);
+            showNotification(error.message);
+        }
     }
 
     function updateTimer() {
-        if (!UI.contestTimer) return;
-        const now = new Date(), timeLeft = STATE.contestEndDate - now;
+        if (!UI.contestTimer || !STATE.contest || !STATE.contest.end_time) {
+            if(UI.contestTimer) UI.contestTimer.textContent = 'Конкурс неактивен';
+            return;
+        };
+        const now = new Date();
+        const timeLeft = new Date(Number(STATE.contest.end_time)) - now;
         if (timeLeft <= 0) {
             UI.contestTimer.textContent = 'Конкурс завершен';
             return;
         }
         const days = Math.floor(timeLeft / 86400000), hours = Math.floor((timeLeft % 86400000) / 3600000), minutes = Math.floor((timeLeft % 3600000) / 60000), seconds = Math.floor((timeLeft % 60000) / 1000);
-        UI.contestTimer.textContent = `${days} дней ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} 🕔`;
+        UI.contestTimer.textContent = `${days}д ${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')} 🕔`;
     }
     // --- КОНЕЦ ЛОГИКИ КОНКУРСОВ ---
 
@@ -906,7 +964,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- ЛОГИКА БАШНИ (TOWER) ---
     function resetTowerGame() {
         if (!UI.towerGameBoard) return;
-        // Отменяем любой отложенный переход на следующий уровень
         if (STATE.towerState.nextLevelTimeout) {
             clearTimeout(STATE.towerState.nextLevelTimeout);
         }
@@ -1096,14 +1153,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
         STATE.coinflipState.isFlipping = true;
         UI.coinflipResult.textContent = '';
-        STATE.userBalance -= bet; // Сразу списываем ставку
+        STATE.userBalance -= bet;
         updateBalanceDisplay();
 
         const result = Math.random() < 0.5 ? 'heads' : 'tails';
 
         const handleFlipEnd = () => {
             if (playerChoice === result) {
-                STATE.userBalance += bet * 2; // Возвращаем ставку + выигрыш
+                STATE.userBalance += bet * 2;
                 UI.coinflipResult.textContent = `Вы выиграли ${bet} ⭐!`;
                 showNotification(`Победа!`);
             } else {
@@ -1261,7 +1318,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- ИНИЦИАЛИЗАЦИЯ ---
     function init() {
-        // Поиск всех элементов DOM
         const selectors = {
             notificationToast: '#notification-toast', userBalanceElement: '#user-balance',
             views: '.view', navButtons: '.nav-btn', caseView: '#case-view', spinView: '#spin-view',
@@ -1276,9 +1332,11 @@ document.addEventListener('DOMContentLoaded', function() {
             profileContents: '.profile-tab-content', profilePhoto: '#profile-photo',
             profileName: '#profile-name', profileId: '#profile-id',
             inviteFriendBtn: '#invite-friend-btn', copyLinkBtn: '#copy-link-btn',
-            contestTimer: '#contest-timer', buyTicketBtn: '#buy-ticket-btn',
-            ticketQuantityInput: '#ticket-quantity-input', ticketQuantityPlus: '#ticket-quantity-plus',
-            ticketQuantityMinus: '#ticket-quantity-minus', userTicketsDisplay: '#user-tickets-display',
+            contestCard: '#contests-view .contest-card', contestTimer: '#contest-timer',
+            buyTicketBtn: '#buy-ticket-btn', ticketQuantityInput: '#ticket-quantity-input',
+            ticketQuantityPlus: '#ticket-quantity-plus', ticketQuantityMinus: '#ticket-quantity-minus',
+            userTicketsDisplay: '#user-tickets-display', contestItemImage: '.contest-item__image',
+            contestItemName: '.contest-item__name', contestParticipants: '#contest-participants',
             upgradeWheel: '#upgrade-wheel', upgradePointer: '#upgrade-pointer',
             upgradeChanceDisplay: '#upgrade-chance-display', upgradeMultiplierDisplay: '#upgrade-multiplier-display',
             yourItemSlot: '#your-item-slot', desiredItemSlot: '#desired-item-slot',
@@ -1307,7 +1365,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 : document.querySelector(selectors[key]);
         }
 
-        // Назначение обработчиков событий
         if (UI.caseImageBtn) UI.caseImageBtn.addEventListener('click', handleCaseClick);
         if (UI.startSpinBtn) UI.startSpinBtn.addEventListener('click', startSpinProcess);
         if (UI.quantitySelector) UI.quantitySelector.addEventListener('click', handleQuantityChange);
@@ -1352,7 +1409,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (UI.coinflipTailsBtn) UI.coinflipTailsBtn.addEventListener('click', () => handleCoinflip('tails'));
         if (UI.rpsButtons) UI.rpsButtons.forEach(button => button.addEventListener('click', () => handleRps(button.dataset.choice)));
 
-        // Начальное состояние приложения
         loadTelegramData();
         loadInitialData();
         updateBalanceDisplay();
