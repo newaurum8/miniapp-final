@@ -38,7 +38,7 @@ app.get('/admin', checkAdminSecret, (req, res) => {
 
 // Подключение к БД
 const dataDir = process.env.RENDER_DISK_MOUNT_PATH || __dirname;
-const dbPath = path.join(dataDir, 'miniapp', 'database.sqlite');
+const dbPath = path.join(dataDir, 'database.sqlite');
 const db = new sqlite3.Database(dbPath, (err) => {
     if (err) {
         console.error("Ошибка при подключении к БД:", err.message);
