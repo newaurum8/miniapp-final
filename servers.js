@@ -7,7 +7,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // Используем переменную окружения для строки подключения
-const connectionString = process.env.DATABASE_URL;
+const connectionString = 'postgresql://postgres.cytdrasqluwoqakgylim:qwerty312018@aws-0-eu-north-1.pooler.supabase.com:6543/postgres';
 
 if (!connectionString) {
     console.error('Ошибка: Переменная окружения DATABASE_URL не установлена!');
@@ -532,3 +532,4 @@ app.listen(port, () => {
     console.log(`Админ-панель: http://localhost:${port}/admin?secret=${ADMIN_SECRET}`);
     initializeDb();
 });
+
