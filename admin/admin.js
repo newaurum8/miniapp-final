@@ -8,14 +8,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const API_BASE_URL = '';
-
+    
     const usersTableBody = document.querySelector('#users-table tbody');
+    // ... (решта селекторів без змін)
     const caseItemsContainer = document.getElementById('case-items-container');
     const saveCaseBtn = document.getElementById('save-case-btn');
     const gameManagementContainer = document.getElementById('game-management-container');
     const saveSettingsBtn = document.getElementById('save-settings-btn');
-
-
+    
+    
     const contestItemSelect = document.getElementById('contest-item-select');
     const contestTicketPriceInput = document.getElementById('contest-ticket-price');
     const contestDurationInput = document.getElementById('contest-duration');
@@ -28,7 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
     let initialCaseItemIds = new Set();
     let currentContest = null;
 
-
     async function fetchAllAdminData() {
         try {
             const [users, items, caseItems, settings, contest] = await Promise.all([
@@ -36,21 +36,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 fetch(`${API_BASE_URL}/api/admin/items?secret=${ADMIN_SECRET_KEY}`).then(res => res.json()),
                 fetch(`${API_BASE_URL}/api/admin/case/items?secret=${ADMIN_SECRET_KEY}`).then(res => res.json()),
                 fetch(`${API_BASE_URL}/api/game_settings?secret=${ADMIN_SECRET_KEY}`).then(res => res.json()),
-                fetch(`${API_BASE_URL}/api/contest/current`).then(res => res.json())
+                fetch(`${API_BASE_URL}/api/contest/current`).then(res => res.json()) 
             ]);
-
-
+            
             renderUsers(users);
-
-
+            // ... (решта викликів)
             allPossibleItems = items;
             initialCaseItemIds = new Set(caseItems);
             renderCaseItemsSelection();
 
-
+            
             renderSettings(settings);
 
-
+            
             populateContestItemSelect(items);
             currentContest = contest;
             renderCurrentContest();
@@ -60,63 +58,51 @@ document.addEventListener('DOMContentLoaded', () => {
             alert('Не вдалося завантажити дані для адмін-панелі.');
         }
     }
-
-
-
+    
     function renderUsers(users) {
         usersTableBody.innerHTML = '';
         if (!users || users.length === 0) {
-            usersTableBody.innerHTML = '<tr><td colspan="5">Користувачі ще не зареєстровані.</td></tr>';
+            usersTableBody.innerHTML = '<tr><td colspan="4">Користувачі ще не зареєстровані.</td></tr>';
             return;
         }
         users.forEach(user => {
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>${user.id}</td>
                 <td>${user.telegram_id || 'N/A'}</td>
                 <td>${user.username || 'N/A'}</td>
-                <td><input type="number" class="balance-input" value="${user.balance}"></td>
+                <td><input type="number" class="balance-input" value="${parseFloat(user.balance).toFixed(2)}"></td>
                 <td><button class="button-primary save-balance-btn" data-telegramid="${user.telegram_id}">Зберегти</button></td>
             `;
             usersTableBody.appendChild(row);
         });
     }
-    // Оновлена функція для виклику нового API
+
     async function updateUserBalance(telegramId, newBalance) {
         try {
             const response = await fetch(`${API_BASE_URL}/api/admin/user/balance?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    telegramId: telegramId,
-                    newBalance: newBalance
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ telegramId: telegramId, newBalance: newBalance })
             });
             const result = await response.json();
             if (response.ok && result.success) {
                 alert(`Баланс користувача ${telegramId} успішно оновлено до ${result.newBalance}.`);
-                // Оновлюємо значення в полі вводу, щоб воно відповідало реальному балансу
                 const input = usersTableBody.querySelector(`button[data-telegramid="${telegramId}"]`).closest('tr').querySelector('.balance-input');
-                if (input) {
-                    input.value = result.newBalance;
-                }
+                if (input) input.value = parseFloat(result.newBalance).toFixed(2);
             } else {
-                throw new Error(result.error || 'Сервер повернув помилку при оновленні балансу.');
+                throw new Error(result.error || 'Сервер повернув помилку.');
             }
         } catch (error) {
             console.error('Помилка:', error);
             alert(`Не вдалося оновити баланс: ${error.message}`);
         }
     }
-    // Оновлений обробник, що використовує data-telegramid
+
     usersTableBody.addEventListener('click', (e) => {
         if (e.target.classList.contains('save-balance-btn')) {
             const telegramId = e.target.dataset.telegramid;
             const balanceInput = e.target.closest('tr').querySelector('.balance-input');
             const newBalance = parseFloat(balanceInput.value);
-
             if (telegramId && !isNaN(newBalance) && newBalance >= 0) {
                 updateUserBalance(telegramId, newBalance);
             } else {
@@ -125,7 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-
+    // ... (решта JS для адмінки без змін)
     function renderCaseItemsSelection() {
         caseItemsContainer.innerHTML = '';
         allPossibleItems.forEach(item => {
@@ -146,30 +132,22 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch(`${API_BASE_URL}/api/admin/case/items?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    itemIds: selectedItemIds
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ itemIds: selectedItemIds })
             });
-            if (!response.ok) throw new Error('Помилка збереження');
-            alert('Вміст кейсу оновлено!');
+            if (!response.ok) throw new Error('Ошибка сохранения');
+            alert('Содержимое кейса обновлено!');
         } catch (error) {
-            console.error('Помилка:', error);
-            alert('Не вдалося зберегти вміст кейсу.');
+            console.error('Ошибка:', error);
+            alert('Не удалось сохранить содержимое кейса.');
         }
     }
     saveCaseBtn.addEventListener('click', saveCaseItems);
-
-
+    
+    
     const gameNames = {
-        'miner_enabled': 'Мінер',
-        'tower_enabled': 'Вежа',
-        'slots_enabled': 'Слоти',
-        'coinflip_enabled': 'Орел і Решка',
-        'rps_enabled': 'К-Н-Б',
-        'upgrade_enabled': 'Апгрейди'
+        'miner_enabled': 'Минер', 'tower_enabled': 'Башня', 'slots_enabled': 'Слоты',
+        'coinflip_enabled': 'Орел и Решка', 'rps_enabled': 'К-Н-Б', 'upgrade_enabled': 'Апгрейды'
     };
 
     function renderSettings(settings) {
@@ -188,47 +166,43 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function saveSettings() {
-        const settingsToSave = {};
+         const settingsToSave = {};
         gameManagementContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
             settingsToSave[cb.dataset.key] = cb.checked;
         });
         try {
-            const response = await fetch(`${API_BASE_URL}/api/admin/game_settings?secret=${ADMIN_SECRET_KEY}`, {
+             const response = await fetch(`${API_BASE_URL}/api/admin/game_settings?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    settings: settingsToSave
-                })
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ settings: settingsToSave })
             });
-            if (!response.ok) throw new Error('Помилка збереження');
-            alert('Налаштування ігор збережено!');
+            if (!response.ok) throw new Error('Ошибка сохранения');
+            alert('Настройки игр сохранены!');
         } catch (error) {
-            console.error('Помилка:', error);
-            alert('Не вдалося зберегти налаштування.');
+             console.error('Ошибка:', error);
+             alert('Не удалось сохранить настройки.');
         }
     }
     saveSettingsBtn.addEventListener('click', saveSettings);
 
-
+    
     function populateContestItemSelect(items) {
-        contestItemSelect.innerHTML = items.map(item => `<option value="${item.id}">${item.name} (Вартість: ${item.value})</option>`).join('');
+        contestItemSelect.innerHTML = items.map(item => `<option value="${item.id}">${item.name} (Стоимость: ${item.value})</option>`).join('');
     }
-
+    
     function renderCurrentContest() {
         if (currentContest) {
             const endDate = new Date(Number(currentContest.end_time)).toLocaleString();
             contestDetailsP.innerHTML = `
                 <strong>Приз:</strong> ${currentContest.itemName} <br>
-                <strong>Ціна квитка:</strong> ${currentContest.ticket_price} <br>
-                <strong>Завершення:</strong> ${endDate} <br>
-                <strong>Квитків куплено:</strong> ${currentContest.count} <br>
-                <strong>Учасників:</strong> ${currentContest.participants}
+                <strong>Цена билета:</strong> ${currentContest.ticket_price} <br>
+                <strong>Завершение:</strong> ${endDate} <br>
+                <strong>Билетов куплено:</strong> ${currentContest.count} <br>
+                <strong>Участников:</strong> ${currentContest.participants}
             `;
             currentContestInfoDiv.classList.remove('hidden');
         } else {
-            contestDetailsP.textContent = 'Активних конкурсів немає.';
+            contestDetailsP.textContent = 'Активных конкурсов нет.';
             currentContestInfoDiv.classList.add('hidden');
         }
     }
@@ -243,50 +217,49 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch(`${API_BASE_URL}/api/admin/contest/create?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(contestData)
             });
             const result = await response.json();
             if (result.success) {
-                alert('Новий конкурс успішно створено!');
-                fetchAllAdminData();
+                alert('Новый конкурс успешно создан!');
+                fetchAllAdminData(); 
             } else {
-                throw new Error(result.error || 'Помилка створення конкурсу');
+                throw new Error(result.error || 'Ошибка создания конкурса');
             }
         } catch (error) {
-            console.error('Помилка:', error);
-            alert(`Не вдалося створити конкурс: ${error.message}`);
+            console.error('Ошибка:', error);
+            alert(`Не удалось создать конкурс: ${error.message}`);
         }
     }
 
     async function drawWinner() {
-        if (!currentContest || !confirm('Ви впевнені, що хочете завершити конкурс і визначити переможця достроково?')) {
+        if (!currentContest || !confirm('Вы уверены, что хотите завершить конкурс и определить победителя досрочно?')) {
             return;
         }
         try {
-            const response = await fetch(`${API_BASE_URL}/api/admin/contest/draw/${currentContest.id}?secret=${ADMIN_SECRET_KEY}`, {
+             const response = await fetch(`${API_BASE_URL}/api/admin/contest/draw/${currentContest.id}?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST'
             });
             const result = await response.json();
-            if (result.success) {
-                alert(`Переможець визначений! Telegram ID: ${result.winner_telegram_id}. Приз зараховано в інвентар переможця.`);
+            if(result.success){
+                 alert(`Победитель определён! Telegram ID: ${result.winner_telegram_id}. Приз зачислен в инвентарь победителя.`);
             } else if (result.message) {
-                alert(result.message);
-            } else {
-                throw new Error(result.error || 'Помилка під час розіграшу');
+                 alert(result.message);
             }
-            fetchAllAdminData();
+            else {
+                throw new Error(result.error || 'Ошибка при розыгрыше');
+            }
+            fetchAllAdminData(); 
         } catch (error) {
-            console.error('Помилка:', error);
-            alert(`Помилка: ${error.message}`);
+            console.error('Ошибка:', error);
+            alert(`Ошибка: ${error.message}`);
         }
     }
     createContestBtn.addEventListener('click', createContest);
     drawWinnerBtn.addEventListener('click', drawWinner);
 
 
-
+    
     fetchAllAdminData();
 });
