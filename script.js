@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     // --- ГЛОБАЛЬНЫЙ СТАТУС ---
     const STATE = {
-        user: null, 
+        user: null,
         userBalance: 0,
         inventory: [],
         gameHistory: [],
@@ -45,6 +45,30 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => UI.notificationToast.classList.remove('visible'), 3000);
     }
 
+    // --- НОВАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ БАЛАНСА ---
+    async function syncBalanceWithBot(balanceChange) {
+        if (!STATE.user || !STATE.user.telegram_id || balanceChange === 0) return;
+        try {
+            const response = await fetch('/api/user/update-balance', { // Используем новый эндпоинт
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    telegram_id: STATE.user.telegram_id,
+                    balance_change: balanceChange // Отправляем изменение, а не новый баланс
+                })
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to sync balance with bot');
+            }
+            console.log('Balance sync successful for change:', balanceChange);
+        } catch (error) {
+            console.error("Ошибка синхронизации баланса с ботом:", error);
+            showNotification('Ошибка синхронизации баланса.');
+        }
+    }
+
+
     async function authenticateUser(tgUser) {
         try {
             const response = await fetch('/api/user/get-or-create', {
@@ -60,15 +84,14 @@ document.addEventListener('DOMContentLoaded', function() {
             STATE.user = userData;
             STATE.userBalance = userData.balance;
             updateBalanceDisplay();
-            await loadInventory(); // <-- ВАЖНО: Загружаем инвентарь после входа
+            await loadInventory();
             loadContestData();
         } catch (error) {
             console.error("Ошибка аутентификации:", error);
             showNotification('Не удалось подключиться к серверу.');
         }
     }
-    
-    // --- НОВАЯ ФУНКЦИЯ ЗАГРУЗКИ ИНВЕНТАРЯ ---
+
     async function loadInventory() {
         if (!STATE.user || !STATE.user.id) return;
         try {
@@ -76,7 +99,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!response.ok) throw new Error('Could not fetch inventory');
             const inventoryData = await response.json();
             STATE.inventory = inventoryData;
-            renderInventory(); // Перерисовываем инвентарь с новыми данными
+            renderInventory();
         } catch (error) {
             console.error("Ошибка загрузки инвентаря:", error);
         }
@@ -179,7 +202,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (btnToActivate) btnToActivate.classList.add('active');
-        
+
         const tg = window.Telegram?.WebApp;
         if (tg) {
             if (tg.BackButton.isVisible) tg.BackButton.offClick();
@@ -193,10 +216,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 tg.BackButton.hide();
             }
         }
-        
-        // --- ОБНОВЛЕНИЕ ДАННЫХ ПРИ ПЕРЕКЛЮЧЕНИИ ---
+
         if (viewId === 'profile-view') {
-            loadInventory(); // <-- Обновляем инвентарь при переходе на профиль
+            loadInventory();
             renderHistory();
         }
         if (viewId === 'upgrade-view') resetUpgradeState(true);
@@ -222,25 +244,25 @@ document.addEventListener('DOMContentLoaded', function() {
                     Продать за <span class="icon">⭐</span> ${item.value.toLocaleString('ru-RU')}
                 </button>
             `;
-            itemEl.querySelector('.inventory-sell-btn').addEventListener('click', () => sellFromInventory(item.uniqueId));
+            itemEl.querySelector('.inventory-sell-btn').addEventListener('click', () => sellFromInventory(item)); // Передаем весь объект
             UI.inventoryContent.appendChild(itemEl);
         });
     }
 
-    async function sellFromInventory(uniqueId) {
+    async function sellFromInventory(itemToSell) {
         if (!STATE.user || !STATE.user.id) return;
         try {
             const response = await fetch('/api/user/inventory/sell', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: STATE.user.id, unique_id: uniqueId })
+                body: JSON.stringify({ user_id: STATE.user.id, unique_id: itemToSell.uniqueId })
             });
             const result = await response.json();
             if (!result.success) throw new Error(result.error || 'Server error');
-            
+
             STATE.userBalance = result.newBalance;
             updateBalanceDisplay();
-            await loadInventory(); // <-- Перезагружаем инвентарь после продажи
+            await loadInventory();
             showNotification('Предмет продан!');
 
         } catch (error) {
@@ -248,6 +270,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification('Не удалось продать предмет.');
         }
     }
+
 
     function renderHistory() {
         if (!UI.historyContent) return;
@@ -321,8 +344,7 @@ document.addEventListener('DOMContentLoaded', function() {
             hideModal(UI.preOpenModal);
 
             STATE.lastWonItems = result.wonItems;
-            
-            // Локально добавляем историю, чтобы не делать лишний запрос
+
             STATE.gameHistory.push(...result.wonItems.map(item => ({ ...item, date: new Date(), name: `Выигрыш из кейса` })));
 
             UI.caseView.classList.add('hidden');
@@ -347,7 +369,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const reelLength = 60, winnerIndex = 50;
         const reel = Array.from({ length: reelLength }, (_, i) => i === winnerIndex ? winnerItem : STATE.possibleItems[Math.floor(Math.random() * STATE.possibleItems.length)]);
         UI.rouletteTrack.innerHTML = reel.map(item => `<div class="roulette-item"><img src="${item.imageSrc}" alt="${item.name}"></div>`).join('');
-        const itemWidth = 130; // 120 width + 5*2 margin
+        const itemWidth = 130;
         const targetPosition = (winnerIndex * itemWidth) + (itemWidth / 2);
         const animationDuration = STATE.isFastSpinEnabled ? '0.2s' : '6s';
         UI.rouletteTrack.style.transition = 'none';
@@ -375,7 +397,7 @@ document.addEventListener('DOMContentLoaded', function() {
             track.innerHTML = reel.map(item => `<div class="vertical-roulette-item"><img src="${item.imageSrc}" alt="${item.name}"></div>`).join('');
             spinnerColumn.appendChild(track);
             UI.multiSpinnerContainer.appendChild(spinnerColumn);
-            const itemHeight = 110; // 100 height + 5*2 margin
+            const itemHeight = 110;
             const targetPosition = (winnerIndex * itemHeight) + (itemHeight / 2);
             track.style.transition = 'none';
             track.style.top = '0px';
@@ -409,13 +431,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 <button class="primary-button" id="result-spin-again-btn">Крутить еще</button>
             </div>`;
         UI.resultModal.appendChild(modalContent);
-        
+
         const finalizeAction = async () => {
             hideModal(UI.resultModal);
             UI.spinView.classList.add('hidden');
             UI.caseView.classList.remove('hidden');
             STATE.isSpinning = false;
-            await loadInventory(); // <-- Обновляем инвентарь после всех действий
+            await loadInventory();
         };
 
         modalContent.querySelector('.close-btn').addEventListener('click', finalizeAction);
@@ -424,11 +446,9 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(handleCaseClick, 100);
         });
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async () => {
-            // Продажа выигранных предметов - это чисто клиентская логика до синхронизации
             STATE.userBalance += totalValue;
             updateBalanceDisplay();
-            // Тут мы НЕ удаляем из STATE.inventory, т.к. призы еще не были туда добавлены с сервера.
-            // Вместо этого мы просто закроем окно, а loadInventory() при finalizeAction() все синхронизирует.
+            // syncBalanceWithBot(totalValue); // Синхронизируем продажу
             showNotification('Предметы проданы!');
             await finalizeAction();
         });
@@ -457,7 +477,7 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error("Не удалось загрузить данные о конкурсе:", error);
         }
     }
-    
+
     function updateContestUI() {
         if (!UI.buyTicketBtn) return;
         if (!STATE.contest) {
@@ -486,7 +506,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!STATE.contest || !STATE.user) return showNotification('Ошибка: данные не загружены.');
         const totalCost = STATE.contest.ticket_price * STATE.ticketQuantity;
         if (STATE.userBalance < totalCost) return showNotification('Недостаточно средств.');
-        
+
         try {
             const response = await fetch('/api/contest/buy-ticket', {
                 method: 'POST',
@@ -498,7 +518,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 })
             });
             const result = await response.json();
-            if (!result.success) throw new Error(result.error);
+            if (!result.success) {
+                throw new Error(result.error);
+            }
             STATE.userBalance = result.newBalance;
             updateBalanceDisplay();
             showNotification(`Вы успешно приобрели ${STATE.ticketQuantity} билет(ов)!`);
@@ -522,8 +544,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const d = Math.floor(timeLeft / 86400000), h = Math.floor((timeLeft % 86400000) / 3600000), m = Math.floor((timeLeft % 3600000) / 60000), s = Math.floor((timeLeft % 60000) / 1000);
         UI.contestTimer.textContent = `${d}д ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} 🕔`;
     }
-    
-    // --- ОСТАЛЬНЫЕ ИГРОВЫЕ ФУНКЦИИ ---
 
     function resetUpgradeState(resetRotation = false) {
         if (!UI.upgradePointer) return;
@@ -616,8 +636,12 @@ document.addEventListener('DOMContentLoaded', function() {
     async function handleUpgradeClick() {
         const { yourItem, desiredItem, chance, isUpgrading } = STATE.upgradeState;
         if (!yourItem || !desiredItem || isUpgrading) return;
+
         STATE.upgradeState.isUpgrading = true;
         UI.performUpgradeBtn.disabled = true;
+
+        syncBalanceWithBot(-yourItem.value); // Списываем предмет для апгрейда
+
         const isSuccess = (Math.random() * 100) < chance;
         const chanceAngle = (chance / 100) * 360;
         const randomOffset = Math.random() * 0.9 + 0.05;
@@ -630,19 +654,16 @@ document.addEventListener('DOMContentLoaded', function() {
 
         UI.upgradePointer.addEventListener('transitionend', () => {
             setTimeout(async () => {
-                const itemIndex = STATE.inventory.findIndex(invItem => invItem.uniqueId === yourItem.uniqueId);
-                if (itemIndex > -1) STATE.inventory.splice(itemIndex, 1);
                 if (isSuccess) {
                     showNotification(`Апгрейд успешный! Вы получили ${desiredItem.name}.`);
-                    const newItem = { ...desiredItem, uniqueId: Date.now() };
-                    STATE.inventory.push(newItem);
-                    STATE.gameHistory.push({ ...newItem, date: new Date(), name: `Апгрейд до ${newItem.name}`, value: newItem.value });
+                    syncBalanceWithBot(desiredItem.value); // Начисляем новый предмет
+                    STATE.gameHistory.push({ ...desiredItem, date: new Date(), name: `Апгрейд до ${desiredItem.name}`, value: desiredItem.value });
                 } else {
                     showNotification(`К сожалению, апгрейд не удался. Предмет потерян.`);
                     STATE.gameHistory.push({ ...yourItem, date: new Date(), name: `Неудачный апгрейд ${yourItem.name}`, value: -yourItem.value });
                 }
                 resetUpgradeState(true);
-                await loadInventory(); // Перезагружаем инвентарь с сервера
+                await loadInventory();
                 renderHistory();
             }, 1500);
         }, { once: true });
@@ -668,6 +689,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
         STATE.userBalance -= bet;
         updateBalanceDisplay();
+        syncBalanceWithBot(-bet); // Синхронизация
         STATE.minerState.isActive = true;
         STATE.minerState.bet = bet;
         STATE.minerState.openedCrystals = 0;
@@ -753,6 +775,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification(`Выигрыш ${STATE.minerState.totalWin.toFixed(2)} ⭐ зачислен!`);
             STATE.userBalance += STATE.minerState.totalWin;
             updateBalanceDisplay();
+            syncBalanceWithBot(STATE.minerState.totalWin); // Синхронизация
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
         }
@@ -776,6 +799,7 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.slotsSpinBtn.disabled = true;
         STATE.userBalance -= bet;
         updateBalanceDisplay();
+        syncBalanceWithBot(-bet); // Синхронизация
         UI.slotsPayline.classList.remove('visible');
 
         const results = [];
@@ -818,6 +842,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (win > 0) {
             STATE.userBalance += win;
             updateBalanceDisplay();
+            syncBalanceWithBot(win); // Синхронизация
             UI.slotsPayline.classList.add('visible');
             showNotification(`${message} (+${win.toFixed(0)} ⭐)`);
         } else {
@@ -847,6 +872,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
         STATE.userBalance -= bet;
         updateBalanceDisplay();
+        syncBalanceWithBot(-bet); // Синхронизация
         STATE.towerState.isActive = true;
         STATE.towerState.bet = bet;
         STATE.towerState.currentLevel = 0;
@@ -860,7 +886,7 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.towerMaxWinDisplay.textContent = `Возможный выигрыш: ${maxWin.toLocaleString('ru-RU')} ⭐`;
         renderTower();
     }
-    
+
     function renderTower() {
         if (!UI.towerGameBoard) return;
         UI.towerGameBoard.innerHTML = '';
@@ -928,6 +954,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const winAmount = STATE.towerState.payouts[STATE.towerState.currentLevel - 1];
             STATE.userBalance += winAmount;
             updateBalanceDisplay();
+            syncBalanceWithBot(winAmount); // Синхронизация
             showNotification(`Выигрыш ${winAmount.toLocaleString('ru-RU')} ⭐ зачислен!`);
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
@@ -949,7 +976,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.towerState.currentLevel === 0 || STATE.towerState.isCashingOut) return;
         if (STATE.towerState.nextLevelTimeout) clearTimeout(STATE.towerState.nextLevelTimeout);
         STATE.towerState.isCashingOut = true;
-        STATE.towerState.isActive = false; 
+        STATE.towerState.isActive = false;
         UI.towerCashoutBtn.disabled = true;
         endTowerGame(true);
     }
@@ -963,12 +990,15 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.coinflipResult.textContent = '';
         STATE.userBalance -= bet;
         updateBalanceDisplay();
+        syncBalanceWithBot(-bet); // Списываем ставку
         const result = Math.random() < 0.5 ? 'heads' : 'tails';
         UI.coin.addEventListener('transitionend', () => {
             if (playerChoice === result) {
-                STATE.userBalance += bet * 2;
+                const winAmount = bet * 2;
+                STATE.userBalance += winAmount;
                 UI.coinflipResult.textContent = `Вы выиграли ${bet} ⭐!`;
                 showNotification(`Победа!`);
+                syncBalanceWithBot(winAmount); // Начисляем выигрыш
             } else {
                 UI.coinflipResult.textContent = `Вы проиграли ${bet} ⭐.`;
                 showNotification(`Проигрыш!`);
@@ -1000,19 +1030,24 @@ document.addEventListener('DOMContentLoaded', function() {
         const targetPosition = (winnerIndex * 130) + 65;
         UI.rpsComputerChoice.addEventListener('transitionend', () => {
             let resultMessage = '';
+            let balanceChange = -bet; // По умолчанию проигрыш
             if (playerChoice === computerChoice) {
                 resultMessage = "Ничья!";
+                balanceChange = 0; // Возвращаем ставку
             } else if ((playerChoice === 'rock' && computerChoice === 'scissors') || (playerChoice === 'paper' && computerChoice === 'rock') || (playerChoice === 'scissors' && computerChoice === 'paper')) {
                 resultMessage = `Вы выиграли ${bet} ⭐!`;
-                STATE.userBalance += bet;
+                balanceChange = bet; // Чистый выигрыш
                 showNotification(`Победа!`);
             } else {
                 resultMessage = `Вы проиграли ${bet} ⭐.`;
-                STATE.userBalance -= bet;
                 showNotification(`Проигрыш!`);
             }
-            UI.rpsResultMessage.textContent = resultMessage;
+
+            STATE.userBalance += balanceChange + (playerChoice === computerChoice ? bet : 0); // Обновляем баланс
             updateBalanceDisplay();
+            syncBalanceWithBot(balanceChange); // Синхронизируем изменение
+            UI.rpsResultMessage.textContent = resultMessage;
+
             setTimeout(() => {
                 STATE.rpsState.isPlaying = false;
                 UI.rpsButtons.forEach(button => button.disabled = false);
@@ -1159,7 +1194,7 @@ document.addEventListener('DOMContentLoaded', function() {
         switchView('game-view');
         setInterval(updateTimer, 1000);
     }
-    
+
     try {
         init();
     } catch (error) {
