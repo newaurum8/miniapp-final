@@ -55,17 +55,16 @@ async function initializeDb() {
     try {
         console.log('Успешное подключение к базе данных PostgreSQL');
 
-        // Создаем таблицу пользователей, если она не существует
         await client.query(`
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
                 telegram_id BIGINT UNIQUE,
                 username TEXT,
-                balance INTEGER NOT NULL DEFAULT 1000
+                balance INTEGER NOT NULL DEFAULT 1000,
+                balance_uah NUMERIC(10, 2) DEFAULT 1000.00
             );
         `);
-        
-        // Создаем таблицу предметов
+
         await client.query(`
             CREATE TABLE IF NOT EXISTS items (
                 id SERIAL PRIMARY KEY,
@@ -75,7 +74,6 @@ async function initializeDb() {
             );
         `);
 
-        // Добавляем предметы по умолчанию
         const items = [
             { id: 1, name: 'Cigar', imageSrc: 'images/item.png', value: 3170 },
             { id: 2, name: 'Bear', imageSrc: 'images/item1.png', value: 440 },
@@ -92,7 +90,6 @@ async function initializeDb() {
             );
         }
 
-        // Создаем остальные таблицы...
         await client.query(`
             CREATE TABLE IF NOT EXISTS user_inventory (
                 id SERIAL PRIMARY KEY,
@@ -115,7 +112,7 @@ async function initializeDb() {
                 value TEXT
             );
         `);
-        
+
         const settings = [
             { key: 'miner_enabled', value: 'true' },
             { key: 'tower_enabled', value: 'true' },
@@ -168,13 +165,13 @@ app.post('/api/user/get-or-create', async (req, res) => {
         return res.status(400).json({ error: "telegram_id является обязательным" });
     }
     try {
-        let userResult = await pool.query("SELECT * FROM users WHERE telegram_id = $1", [telegram_id]);
+        let userResult = await pool.query("SELECT *, balance_uah as balance FROM users WHERE telegram_id = $1", [telegram_id]);
         if (userResult.rows.length > 0) {
             res.json(userResult.rows[0]);
         } else {
             const initialBalance = 1000;
             const newUserResult = await pool.query(
-                "INSERT INTO users (telegram_id, username, balance) VALUES ($1, $2, $3) RETURNING *",
+                "INSERT INTO users (telegram_id, username, balance_uah) VALUES ($1, $2, $3) RETURNING *, balance_uah as balance",
                 [telegram_id, username, initialBalance]
             );
             res.status(201).json(newUserResult.rows[0]);
@@ -184,7 +181,6 @@ app.post('/api/user/get-or-create', async (req, res) => {
     }
 });
 
-// Эндпоинт для обновления баланса из мини-приложения
 app.post('/api/user/update-balance', async (req, res) => {
     const { telegram_id, balance_change } = req.body;
     if (!telegram_id || typeof balance_change !== 'number') {
@@ -193,17 +189,18 @@ app.post('/api/user/update-balance', async (req, res) => {
 
     try {
         const result = await pool.query(
-            'UPDATE users SET balance = balance + $1 WHERE telegram_id = $2 RETURNING balance',
+            'UPDATE users SET balance_uah = balance_uah + $1 WHERE telegram_id = $2 RETURNING balance_uah',
             [balance_change, telegram_id]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'Пользователь не найден' });
         }
-        res.json({ success: true, newBalance: result.rows[0].balance });
+        res.json({ success: true, newBalance: parseFloat(result.rows[0].balance_uah) });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
+
 
 app.get('/api/user/inventory', async (req, res) => {
     const { user_id } = req.query;
@@ -234,21 +231,21 @@ app.post('/api/user/inventory/sell', async (req, res) => {
     try {
         await client.query('BEGIN');
         const itemResult = await client.query(
-            'SELECT i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.id = $1 AND ui.user_id = $2', 
+            'SELECT i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.id = $1 AND ui.user_id = $2',
             [unique_id, user_id]
         );
         if (itemResult.rows.length === 0) {
             throw new Error('Предмет не найден в инвентаре');
         }
         const itemValue = itemResult.rows[0].value;
-        
+
         await client.query("DELETE FROM user_inventory WHERE id = $1", [unique_id]);
-        await client.query("UPDATE users SET balance = balance + $1 WHERE id = $2", [itemValue, user_id]);
-        
+        await client.query("UPDATE users SET balance_uah = balance_uah + $1 WHERE id = $2", [itemValue, user_id]);
+
         await client.query('COMMIT');
-        
-        const userResult = await pool.query("SELECT balance FROM users WHERE id = $1", [user_id]);
-        res.json({ success: true, newBalance: userResult.rows[0].balance });
+
+        const userResult = await pool.query("SELECT balance_uah FROM users WHERE id = $1", [user_id]);
+        res.json({ success: true, newBalance: parseFloat(userResult.rows[0].balance_uah) });
 
     } catch (err) {
         await client.query('ROLLBACK');
@@ -257,6 +254,7 @@ app.post('/api/user/inventory/sell', async (req, res) => {
         client.release();
     }
 });
+
 
 app.get('/api/case/items_full', async (req, res) => {
     try {
@@ -292,25 +290,26 @@ app.post('/api/case/open', async (req, res) => {
     try {
         await client.query('BEGIN');
 
-        const userResult = await client.query("SELECT id, balance FROM users WHERE id = $1 FOR UPDATE", [user_id]);
+        const userResult = await client.query("SELECT id, balance_uah FROM users WHERE id = $1 FOR UPDATE", [user_id]);
         if (userResult.rows.length === 0) throw new Error('Пользователь не найден');
         const user = userResult.rows[0];
+        const balance = parseFloat(user.balance_uah);
 
-        if (user.balance < totalCost) throw new Error('Недостаточно средств');
+        if (balance < totalCost) throw new Error('Недостаточно средств');
 
         const caseItemsResult = await client.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
         if (caseItemsResult.rows.length === 0) throw new Error('Кейс пуст');
         const caseItems = caseItemsResult.rows;
 
-        const newBalance = user.balance - totalCost;
+        const newBalance = balance - totalCost;
         const wonItems = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
-        
-        await client.query("UPDATE users SET balance = $1 WHERE id = $2", [newBalance, user.id]);
-        
+
+        await client.query("UPDATE users SET balance_uah = $1 WHERE id = $2", [newBalance, user.id]);
+
         for (const item of wonItems) {
             await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [user.id, item.id]);
         }
-        
+
         await client.query('COMMIT');
         res.json({ success: true, newBalance, wonItems });
 
@@ -344,12 +343,12 @@ app.get('/api/contest/current', async (req, res) => {
     try {
         const contestResult = await pool.query(sql, [now]);
         if (contestResult.rows.length === 0) return res.json(null);
-        
+
         const contest = contestResult.rows[0];
 
         const ticketCountResult = await pool.query("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = $1", [contest.id]);
         const ticketCount = ticketCountResult.rows[0];
-        
+
         const { telegram_id } = req.query;
         let userTickets = 0;
         if (telegram_id) {
@@ -374,22 +373,23 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        
+
         const contestResult = await client.query("SELECT * FROM contests WHERE id = $1 AND is_active = TRUE", [contest_id]);
         if (contestResult.rows.length === 0 || contestResult.rows[0].end_time <= Date.now()) {
             throw new Error('Конкурс неактивен или завершен');
         }
         const contest = contestResult.rows[0];
 
-        const userResult = await client.query("SELECT id, balance FROM users WHERE telegram_id = $1 FOR UPDATE", [telegram_id]);
+        const userResult = await client.query("SELECT id, balance_uah FROM users WHERE telegram_id = $1 FOR UPDATE", [telegram_id]);
         if (userResult.rows.length === 0) throw new Error('Пользователь не найден');
         const user = userResult.rows[0];
+        const balance = parseFloat(user.balance_uah);
 
         const totalCost = contest.ticket_price * quantity;
-        if (user.balance < totalCost) throw new Error('Недостаточно средств');
+        if (balance < totalCost) throw new Error('Недостаточно средств');
 
-        const newBalance = user.balance - totalCost;
-        await client.query("UPDATE users SET balance = $1 WHERE id = $2", [newBalance, user.id]);
+        const newBalance = balance - totalCost;
+        await client.query("UPDATE users SET balance_uah = $1 WHERE id = $2", [newBalance, user.id]);
 
         for (let i = 0; i < quantity; i++) {
             await client.query("INSERT INTO user_tickets (contest_id, user_id, telegram_id) VALUES ($1, $2, $3)", [contest_id, user.id, telegram_id]);
@@ -411,7 +411,7 @@ app.use('/api/admin', checkAdminSecret);
 
 app.get('/api/admin/users', async (req, res) => {
     try {
-        const { rows } = await pool.query("SELECT id, telegram_id, username, balance FROM users ORDER BY id DESC");
+        const { rows } = await pool.query("SELECT id, telegram_id, username, balance_uah as balance FROM users ORDER BY id DESC");
         res.json(rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -421,7 +421,7 @@ app.get('/api/admin/users', async (req, res) => {
 app.post('/api/admin/user/balance', async (req, res) => {
     const { userId, newBalance } = req.body;
     try {
-        const result = await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [newBalance, userId]);
+        const result = await pool.query("UPDATE users SET balance_uah = $1 WHERE id = $2", [newBalance, userId]);
         res.json({ success: true, changes: result.rowCount });
     } catch (err) {
         res.status(500).json({ "error": err.message });
@@ -537,7 +537,7 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
 
         await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [winner.user_id, contest.item_id]);
         await client.query("UPDATE contests SET is_active = FALSE, winner_id = $1 WHERE id = $2", [winner.user_id, contestId]);
-        
+
         await client.query('COMMIT');
         res.json({ success: true, winner_telegram_id: winner.telegram_id, message: "Приз зачислен в инвентарь победителя." });
     } catch (err) {
