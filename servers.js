@@ -29,8 +29,8 @@ app.use(express.json());
 
 // --- КОНФИГУРАЦИЯ ---
 const ADMIN_SECRET = 'Aurum';
-// !!! ИСПРАВЛЕНИЕ: Установлен ваш публичный URL-адрес Python-сервера !!!
-const BOT_API_URL = 'https://server4644.server-vps.com/api/v1/balance/change'; 
+// !!! ИСПРАВЛЕНИЕ: Установлен IP-адрес и порт вашего Python-сервера !!!
+const BOT_API_URL = 'http://91.239.235.200:8000/api/v1/balance/change';
 const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY"; // Ваш секретный ключ
 
 // --- Хелпер для отправки запросов к API бота ---
@@ -234,6 +234,29 @@ app.post('/api/user/get-or-create', async (req, res) => {
     }
 });
 
+// !!! НОВЫЙ ЭНДПОИНТ ДЛЯ СИНХРОНИЗАЦИИ ОТ БОТА !!!
+app.post('/api/user/update-balance', async (req, res) => {
+    const { telegram_id, newBalance } = req.body;
+    if (!telegram_id || newBalance === undefined) {
+        return res.status(400).json({ error: "telegram_id and newBalance are required" });
+    }
+    try {
+        const result = await pool.query(
+            "UPDATE users SET balance = $1 WHERE telegram_id = $2 RETURNING *",
+            [newBalance, telegram_id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        console.log(`Balance updated from bot for user ${telegram_id} to ${newBalance}`);
+        res.json({ success: true, message: "Balance updated" });
+    } catch (err) {
+        console.error("Error updating balance from bot:", err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+
 app.get('/api/user/inventory', async (req, res) => {
     const { user_id } = req.query;
     if (!user_id) {
@@ -263,19 +286,19 @@ app.post('/api/user/inventory/sell', async (req, res) => {
     try {
         await client.query('BEGIN');
         const itemResult = await client.query(
-            'SELECT i.value, u.telegram_id FROM user_inventory ui JOIN items i ON ui.item_id = i.id JOIN users u ON ui.user_id = u.id WHERE ui.id = $1 AND ui.user_id = $2', 
+            'SELECT i.value, u.telegram_id FROM user_inventory ui JOIN items i ON ui.item_id = i.id JOIN users u ON ui.user_id = u.id WHERE ui.id = $1 AND ui.user_id = $2',
             [unique_id, user_id]
         );
         if (itemResult.rows.length === 0) throw new Error('Предмет не найден в инвентаре');
-        
+
         const { value: itemValue, telegram_id } = itemResult.rows[0];
-        
+
         const botResponse = await changeBalanceInBot(telegram_id, itemValue, `sell_item_${unique_id}`);
-        
+
         await client.query("DELETE FROM user_inventory WHERE id = $1", [unique_id]);
-        
+
         await client.query('COMMIT');
-        
+
         res.json({ success: true, newBalance: botResponse.new_balance });
 
     } catch (err) {
@@ -320,7 +343,7 @@ app.post('/api/case/open', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        
+
         const userResult = await client.query("SELECT telegram_id FROM users WHERE id = $1", [user_id]);
         if (userResult.rows.length === 0) throw new Error('Пользователь не найден');
         const { telegram_id } = userResult.rows[0];
@@ -337,11 +360,11 @@ app.post('/api/case/open', async (req, res) => {
         }
 
         const wonItems = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
-        
+
         for (const item of wonItems) {
             await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [user_id, item.id]);
         }
-        
+
         await client.query('COMMIT');
         res.json({ success: true, newBalance: botResponse.new_balance, wonItems });
 
@@ -376,12 +399,12 @@ app.get('/api/contest/current', async (req, res) => {
     try {
         const contestResult = await pool.query(sql, [now]);
         if (contestResult.rows.length === 0) return res.json(null);
-        
+
         const contest = contestResult.rows[0];
 
         const ticketCountResult = await pool.query("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = $1", [contest.id]);
         const ticketCount = ticketCountResult.rows[0];
-        
+
         const { telegram_id } = req.query;
         let userTickets = 0;
         if (telegram_id) {
@@ -406,7 +429,7 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        
+
         const contestResult = await client.query("SELECT * FROM contests WHERE id = $1 AND is_active = TRUE", [contest_id]);
         if (contestResult.rows.length === 0 || contestResult.rows[0].end_time <= Date.now()) {
             throw new Error('Конкурс неактивен или завершен');
@@ -418,7 +441,7 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
         const user = userResult.rows[0];
 
         const totalCost = contest.ticket_price * quantity;
-        
+
         const botResponse = await changeBalanceInBot(telegram_id, -totalCost, `buy_ticket_x${quantity}_contest_${contest_id}`);
 
         for (let i = 0; i < quantity; i++) {
@@ -567,7 +590,7 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
 
         await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [winner.user_id, contest.item_id]);
         await client.query("UPDATE contests SET is_active = FALSE, winner_id = $1 WHERE id = $2", [winner.user_id, contestId]);
-        
+
         await client.query('COMMIT');
         res.json({ success: true, winner_telegram_id: winner.telegram_id, message: "Приз зачислен в инвентарь победителя." });
     } catch (err) {
