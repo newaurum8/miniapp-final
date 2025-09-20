@@ -28,9 +28,9 @@ app.use(cors());
 app.use(express.json());
 
 // --- КОНФІГУРАЦІЯ ---
-const ADMIN_SECRET = 'Aurum'; // Ваш секретний ключ для адмін-панелі
+const ADMIN_SECRET = 'Aurum';
 const BOT_API_URL = 'http://91.239.235.200:8000/api/v1/balance/change';
-const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY"; // Ваш секретний ключ для підпису
+const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
 
 // --- Хелпер для безпечних запитів до API бота ---
 async function changeBalanceInBot(telegramId, delta, reason) {
@@ -58,22 +58,14 @@ async function changeBalanceInBot(telegramId, delta, reason) {
                 body: body,
                 timeout: 7000
             });
-
             const result = await response.json();
-
             if (!response.ok) {
-                if (response.status >= 400 && response.status < 500) {
-                    throw new Error(result.detail || `Помилка API бота: ${response.status}`);
-                }
-                console.warn(`Спроба ${attempt} не вдалася. Статус: ${response.status}. Відповідь:`, result);
-                if (attempt === 3) throw new Error(`Помилка API бота після 3 спроб: ${result.detail || response.status}`);
-                await new Promise(res => setTimeout(res, 1000 * attempt));
-                continue;
+                throw new Error(result.detail || `Помилка API бота: ${response.status}`);
             }
             return result;
         } catch (error) {
-            console.error(`Спроба ${attempt} провалилася з мережевою помилкою:`, error);
-            if (attempt === 3) throw new Error("Не вдалося зв'язатися з сервером бота після кількох спроб.");
+            console.error(`Спроба ${attempt} провалилася:`, error.message);
+            if (attempt === 3) throw new Error("Не вдалося зв'язатися з сервером бота.");
             await new Promise(res => setTimeout(res, 1000 * attempt));
         }
     }
@@ -97,7 +89,6 @@ app.get('/admin', checkAdminSecret, (req, res) => res.sendFile(path.join(__dirna
 
 // --- API Маршрути ---
 
-// Аутентифікація/реєстрація користувача
 app.post('/api/user/get-or-create', async (req, res) => {
     const { telegram_id, username } = req.body;
     if (!telegram_id) {
@@ -134,8 +125,6 @@ app.post('/api/user/get-or-create', async (req, res) => {
     }
 });
 
-
-// Отримання інвентарю
 app.get('/api/user/inventory', async (req, res) => {
     const { user_id } = req.query;
     if (!user_id) {
@@ -155,7 +144,6 @@ app.get('/api/user/inventory', async (req, res) => {
     }
 });
 
-// Продаж одного предмета
 app.post('/api/user/inventory/sell', async (req, res) => {
     const { user_id, unique_id } = req.body;
     if (!user_id || !unique_id) {
@@ -186,7 +174,6 @@ app.post('/api/user/inventory/sell', async (req, res) => {
     }
 });
 
-// Продаж кількох предметів
 app.post('/api/user/inventory/sell-multiple', async (req, res) => {
     const { user_id, unique_ids } = req.body;
     if (!user_id || !Array.isArray(unique_ids) || unique_ids.length === 0) {
@@ -216,7 +203,6 @@ app.post('/api/user/inventory/sell-multiple', async (req, res) => {
     }
 });
 
-// Відкриття кейсу
 app.post('/api/case/open', async (req, res) => {
     const { user_id, quantity } = req.body;
     const casePrice = 100;
@@ -255,12 +241,7 @@ app.get('/api/case/items_full', async (req, res) => {
     try {
         const sql = `SELECT i.id, i.name, i."imageSrc", i.value FROM items i LEFT JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1 OR (SELECT COUNT(*) FROM case_items) = 0`;
         const { rows } = await pool.query(sql);
-        if (rows.length > 0) {
-            res.json(rows);
-        } else {
-            const allItemsResult = await pool.query('SELECT id, name, "imageSrc", value FROM items ORDER BY value DESC');
-            res.json(allItemsResult.rows);
-        }
+        res.json(rows.length > 0 ? rows : (await pool.query('SELECT id, name, "imageSrc", value FROM items ORDER BY value DESC')).rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -275,6 +256,65 @@ app.get('/api/game_settings', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+// ### ВІДНОВЛЕНІ МАРШРУТИ ДЛЯ КОНКУРСІВ ###
+app.get('/api/contest/current', async (req, res) => {
+    const now = Date.now();
+    const sql = `
+        SELECT c.id, c.end_time, c.ticket_price, c.winner_id, i.name AS "itemName", i."imageSrc" AS "itemImageSrc"
+        FROM contests c
+        JOIN items i ON c.item_id = i.id
+        WHERE c.is_active = TRUE AND c.end_time > $1
+        ORDER BY c.id DESC LIMIT 1
+    `;
+    try {
+        const contestResult = await pool.query(sql, [now]);
+        if (contestResult.rows.length === 0) return res.json(null);
+        
+        const contest = contestResult.rows[0];
+        const ticketCountResult = await pool.query("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = $1", [contest.id]);
+        const ticketCount = ticketCountResult.rows[0];
+        
+        const { telegram_id } = req.query;
+        let userTickets = 0;
+        if (telegram_id) {
+            const userTicketsResult = await pool.query("SELECT COUNT(*) AS count FROM user_tickets WHERE contest_id = $1 AND user_id = $2", [contest.id, telegram_id]);
+            userTickets = Number(userTicketsResult.rows[0].count);
+        }
+        res.json({ ...contest, ...ticketCount, userTickets });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/contest/buy-ticket', async (req, res) => {
+    const { user_id, quantity } = req.body;
+    if (!user_id || !quantity || quantity < 1) {
+        return res.status(400).json({ error: 'Неверные данные для покупки билета' });
+    }
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const contestResult = await client.query("SELECT * FROM contests WHERE is_active = TRUE ORDER BY id DESC LIMIT 1");
+        if (contestResult.rows.length === 0 || contestResult.rows[0].end_time <= Date.now()) {
+            throw new Error('Конкурс неактивен или завершен');
+        }
+        const contest = contestResult.rows[0];
+        const totalCost = contest.ticket_price * quantity;
+        const botResponse = await changeBalanceInBot(user_id, -totalCost, `buy_ticket_x${quantity}_contest_${contest.id}`);
+        for (let i = 0; i < quantity; i++) {
+            await client.query("INSERT INTO user_tickets (contest_id, user_id) VALUES ($1, $2)", [contest.id, user_id]);
+        }
+        await client.query('COMMIT');
+        res.json({ success: true, newBalance: botResponse.new_balance });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+// ### КІНЕЦЬ ВІДНОВЛЕНИХ МАРШРУТІВ ###
 
 // --- Адмінські маршрути ---
 app.use('/api/admin', checkAdminSecret);
@@ -370,6 +410,68 @@ app.post('/api/admin/game_settings', async (req, res) => {
         client.release();
     }
 });
+
+// ### ВІДНОВЛЕНІ АДМІНСЬКІ МАРШРУТИ ДЛЯ КОНКУРСІВ ###
+app.post('/api/admin/contest/create', async (req, res) => {
+    const { item_id, ticket_price, duration_hours } = req.body;
+    if (!item_id || !ticket_price || !duration_hours) {
+        return res.status(400).json({ error: 'Все поля обязательны' });
+    }
+    const endTime = Date.now() + duration_hours * 60 * 60 * 1000;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        await client.query("UPDATE contests SET is_active = FALSE WHERE is_active = TRUE");
+        const result = await client.query(
+            "INSERT INTO contests (item_id, ticket_price, end_time) VALUES ($1, $2, $3) RETURNING id",
+            [item_id, ticket_price, endTime]
+        );
+        await client.query('COMMIT');
+        res.status(201).json({ success: true, contestId: result.rows[0].id });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+app.post('/api/admin/contest/draw/:id', async (req, res) => {
+    const contestId = req.params.id;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const contestResult = await client.query("SELECT * FROM contests WHERE id = $1 AND is_active = TRUE", [contestId]);
+        if (contestResult.rows.length === 0) {
+            throw new Error('Активный конкурс не найден');
+        }
+        const contest = contestResult.rows[0];
+
+        const participantsResult = await client.query("SELECT DISTINCT user_id FROM user_tickets WHERE contest_id = $1", [contestId]);
+        if (participantsResult.rows.length === 0) {
+            await client.query("UPDATE contests SET is_active = FALSE WHERE id = $1", [contestId]);
+            await client.query('COMMIT');
+            return res.json({ message: 'В конкурсе не было участников, конкурс завершен.' });
+        }
+        const participants = participantsResult.rows;
+        const winner = participants[Math.floor(Math.random() * participants.length)];
+
+        await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [winner.user_id, contest.item_id]);
+        await client.query("UPDATE contests SET is_active = FALSE, winner_id = $1 WHERE id = $2", [winner.user_id, contestId]);
+        
+        const winnerTelegramIdResult = await client.query("SELECT user_id FROM users WHERE user_id = $1", [winner.user_id]);
+        const winnerTelegramId = winnerTelegramIdResult.rows[0].user_id;
+
+        await client.query('COMMIT');
+        res.json({ success: true, winner_telegram_id: winnerTelegramId, message: "Приз зачислен в инвентарь победителя." });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+// ### КІНЕЦЬ ВІДНОВЛЕНИХ АДМІНСЬКИХ МАРШРУТІВ ###
 
 app.listen(port, () => {
     console.log(`Сервер запущен на порту ${port}`);
