@@ -30,7 +30,7 @@ app.use(express.json());
 // --- КОНФИГУРАЦИЯ ---
 const ADMIN_SECRET = 'Aurum';
 // !!! ВАЖНО: Замените 'http://localhost:8000' на реальный публичный адрес вашего Python-сервера
-const BOT_API_URL = 'http://localhost:8000/api/v1/balance/change'; 
+const BOT_API_URL = 'http://localhost:8000/api/v1/balance/change';
 const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY"; // Ваш секретный ключ
 
 // --- Хелпер для отправки запросов к API бота ---
