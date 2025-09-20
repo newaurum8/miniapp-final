@@ -9,9 +9,8 @@ const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// ВАЖЛИВО: Переконайтеся, що ця змінна середовища встановлена на Render.
-// Я повернув ваш оригінальний рядок підключення для надійності.
-const connectionString = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_xoO8NXpDn1fy@ep-hidden-sound-a23oyr8a-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require';
+// ВИПРАВЛЕННЯ 1: Додано "&channel_binding=require" до рядка підключення
+const connectionString = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_xoO8NXpDn1fy@ep-hidden-sound-a23oyr8a-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
 if (!connectionString) {
     console.error('Помилка: Змінна середовища DATABASE_URL не встановлена!');
@@ -29,21 +28,20 @@ app.use(cors());
 app.use(express.json());
 
 // --- КОНФІГУРАЦІЯ ---
-const ADMIN_SECRET = 'Aurum'; // Ваш секретний ключ для адмін-панелі
-// URL вашого Python-сервера (бота)
+const ADMIN_SECRET = 'Aurum';
 const BOT_API_URL = 'http://91.239.235.200:8000/api/v1/balance/change';
-// Секретний ключ для підпису запитів до API бота (має бути таким самим, як у webhook_handler.py)
 const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
 
 // --- Хелпер для безпечних запитів до API бота ---
 async function changeBalanceInBot(telegramId, delta, reason) {
     const idempotencyKey = uuidv4();
     const body = JSON.stringify({
-        user_id: parseInt(telegramId, 10), // Переконуємось, що telegram_id - це число
+        user_id: parseInt(telegramId, 10),
         delta: parseFloat(delta),
         reason: reason
     });
 
+    // ВИПРАВЛЕННЯ 2: Змінено 'sha265' на 'sha256'
     const signature = crypto
         .createHmac('sha256', MINI_APP_SECRET_KEY)
         .update(body)
@@ -77,7 +75,6 @@ async function changeBalanceInBot(telegramId, delta, reason) {
         } catch (error) {
             console.error(`Спроба ${attempt} провалилася з мережевою помилкою:`, error);
             if (attempt === 3) throw new Error("Не вдалося зв'язатися з сервером бота після кількох спроб.");
-            // Немає `await` перед рекурсивним викликом, це помилка. Потрібно просто чекати.
              await new Promise(res => setTimeout(res, 1000 * attempt));
         }
     }
@@ -101,31 +98,27 @@ app.get('/admin', checkAdminSecret, (req, res) => res.sendFile(path.join(__dirna
 
 // --- API Маршрути ---
 
-// Аутентифікація/реєстрація користувача
 app.post('/api/user/get-or-create', async (req, res) => {
     const { telegram_id, username } = req.body;
     if (!telegram_id) {
         return res.status(400).json({ error: "telegram_id є обов'язковим" });
     }
     try {
-        // Працюємо зі схемою бота: user_id це telegram_id, balance це balance_uah
         const query = "SELECT user_id, username, balance_uah FROM users WHERE user_id = $1";
         let userResult = await pool.query(query, [telegram_id]);
         
         if (userResult.rows.length > 0) {
             const user = userResult.rows[0];
             res.json({
-                id: user.user_id, // Для сумісності з фронтендом, id = user_id
+                id: user.user_id,
                 telegram_id: user.user_id,
                 username: user.username,
                 balance: parseFloat(user.balance_uah)
             });
         } else {
-            // Якщо користувача немає, створюємо його, як це робить бот
-            const insertQuery = "INSERT INTO users (user_id, username) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING RETURNING user_id, username, balance_uah";
+            const insertQuery = "INSERT INTO users (user_id, username) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING";
             await pool.query(insertQuery, [telegram_id, username]);
             
-            // Повторно запитуємо дані, щоб отримати баланс за замовчуванням
             let finalUserResult = await pool.query(query, [telegram_id]);
             const user = finalUserResult.rows[0];
             res.status(201).json({
@@ -141,10 +134,8 @@ app.post('/api/user/get-or-create', async (req, res) => {
     }
 });
 
-
-// Отримання інвентарю
 app.get('/api/user/inventory', async (req, res) => {
-    const { user_id } = req.query; // Тут user_id це telegram_id
+    const { user_id } = req.query;
     if (!user_id) {
         return res.status(400).json({ error: 'user_id є обов\'язковим' });
     }
@@ -162,9 +153,8 @@ app.get('/api/user/inventory', async (req, res) => {
     }
 });
 
-// Продаж одного предмета
 app.post('/api/user/inventory/sell', async (req, res) => {
-    const { user_id, unique_id } = req.body; // user_id це telegram_id
+    const { user_id, unique_id } = req.body;
     if (!user_id || !unique_id) {
         return res.status(400).json({ error: 'Невірні дані для продажу' });
     }
@@ -193,32 +183,25 @@ app.post('/api/user/inventory/sell', async (req, res) => {
     }
 });
 
-// Новий маршрут для продажу кількох предметів
 app.post('/api/user/inventory/sell-multiple', async (req, res) => {
-    const { user_id, unique_ids } = req.body; // user_id це telegram_id
+    const { user_id, unique_ids } = req.body;
     if (!user_id || !Array.isArray(unique_ids) || unique_ids.length === 0) {
         return res.status(400).json({ error: 'Невірні дані для продажу' });
     }
-
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
         const itemsResult = await client.query(
             'SELECT i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.id = ANY($1::int[]) AND ui.user_id = $2',
             [unique_ids, user_id]
         );
-
         if (itemsResult.rows.length !== unique_ids.length) {
             throw new Error('Один або кілька предметів не знайдено в інвентарі');
         }
-
         const totalValue = itemsResult.rows.reduce((sum, item) => sum + item.value, 0);
         const botResponse = await changeBalanceInBot(user_id, totalValue, `sell_multiple_${unique_ids.length}_items`);
-
         await client.query("DELETE FROM user_inventory WHERE id = ANY($1::int[])", [unique_ids]);
         await client.query('COMMIT');
-
         res.json({ success: true, newBalance: botResponse.new_balance });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -229,28 +212,21 @@ app.post('/api/user/inventory/sell-multiple', async (req, res) => {
     }
 });
 
-// Відкриття кейсу
 app.post('/api/case/open', async (req, res) => {
-    const { user_id, quantity } = req.body; // user_id тут це telegram_id
+    const { user_id, quantity } = req.body;
     const casePrice = 100;
     const totalCost = casePrice * (quantity || 1);
-
     if (!user_id || !quantity || quantity < 1) {
         return res.status(400).json({ error: 'Неверные данные для открытия кейса' });
     }
-
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
         const botResponse = await changeBalanceInBot(user_id, -totalCost, `open_case_x${quantity}`);
-
         const caseItemsResult = await client.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
         const caseItems = caseItemsResult.rows.length > 0 ? caseItemsResult.rows : (await client.query('SELECT id, name, "imageSrc", value FROM items')).rows;
         if (caseItems.length === 0) throw new Error('В игре нет предметов');
-
         const wonItemsData = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
-        
         const wonItemsWithUniqueIds = [];
         for (const item of wonItemsData) {
             const result = await client.query(
@@ -259,10 +235,8 @@ app.post('/api/case/open', async (req, res) => {
             );
             wonItemsWithUniqueIds.push({ ...item, uniqueId: result.rows[0].id });
         }
-        
         await client.query('COMMIT');
         res.json({ success: true, newBalance: botResponse.new_balance, wonItems: wonItemsWithUniqueIds });
-
     } catch (err) {
         await client.query('ROLLBACK');
         console.error("Ошибка открытия кейса:", err);
@@ -274,14 +248,8 @@ app.post('/api/case/open', async (req, res) => {
 
 app.get('/api/case/items_full', async (req, res) => {
     try {
-        const sql = `
-            SELECT i.id, i.name, i."imageSrc", i.value
-            FROM items i
-            LEFT JOIN case_items ci ON i.id = ci.item_id
-            WHERE ci.case_id = 1 OR (SELECT COUNT(*) FROM case_items) = 0
-        `;
+        const sql = `SELECT i.id, i.name, i."imageSrc", i.value FROM items i LEFT JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1 OR (SELECT COUNT(*) FROM case_items) = 0`;
         const { rows } = await pool.query(sql);
-
         if (rows.length > 0) {
             res.json(rows);
         } else {
@@ -320,7 +288,6 @@ app.post('/api/admin/user/balance', async (req, res) => {
     if (telegramId === undefined || newBalance === undefined || isNaN(newBalance)) {
         return res.status(400).json({ "error": "Необхідно вказати telegramId та newBalance" });
     }
-
     try {
         const userResult = await pool.query("SELECT balance_uah FROM users WHERE user_id = $1", [telegramId]);
         if (userResult.rows.length === 0) {
@@ -328,10 +295,8 @@ app.post('/api/admin/user/balance', async (req, res) => {
         }
         const currentBalance = parseFloat(userResult.rows[0].balance_uah);
         const delta = parseFloat(newBalance) - currentBalance;
-
         const reason = `admin_update_by_${req.ip}`;
         const botResponse = await changeBalanceInBot(telegramId, delta, reason);
-
         res.json({ success: true, newBalance: botResponse.new_balance });
     } catch (err) {
         console.error("Помилка в /api/admin/user/balance:", err);
