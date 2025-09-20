@@ -9,11 +9,11 @@ const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// ВИПРАВЛЕННЯ 1: Додано "&channel_binding=require" до рядка підключення
-const connectionString = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_xoO8NXpDn1fy@ep-hidden-sound-a23oyr8a-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+// Використовуємо ваш рядок підключення напряму
+const connectionString = 'postgresql://neondb_owner:npg_gFvZxTR7qdw1@ep-round-sound-agieqqp0-pooler.c-2.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
 if (!connectionString) {
-    console.error('Помилка: Змінна середовища DATABASE_URL не встановлена!');
+    console.error('Помилка: Рядок підключення до бази даних відсутній!');
     process.exit(1);
 }
 
@@ -28,9 +28,9 @@ app.use(cors());
 app.use(express.json());
 
 // --- КОНФІГУРАЦІЯ ---
-const ADMIN_SECRET = 'Aurum';
+const ADMIN_SECRET = 'Aurum'; // Ваш секретний ключ для адмін-панелі
 const BOT_API_URL = 'http://91.239.235.200:8000/api/v1/balance/change';
-const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
+const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY"; // Ваш секретний ключ для підпису
 
 // --- Хелпер для безпечних запитів до API бота ---
 async function changeBalanceInBot(telegramId, delta, reason) {
@@ -41,7 +41,6 @@ async function changeBalanceInBot(telegramId, delta, reason) {
         reason: reason
     });
 
-    // ВИПРАВЛЕННЯ 2: Змінено 'sha265' на 'sha256'
     const signature = crypto
         .createHmac('sha256', MINI_APP_SECRET_KEY)
         .update(body)
@@ -75,7 +74,7 @@ async function changeBalanceInBot(telegramId, delta, reason) {
         } catch (error) {
             console.error(`Спроба ${attempt} провалилася з мережевою помилкою:`, error);
             if (attempt === 3) throw new Error("Не вдалося зв'язатися з сервером бота після кількох спроб.");
-             await new Promise(res => setTimeout(res, 1000 * attempt));
+            await new Promise(res => setTimeout(res, 1000 * attempt));
         }
     }
 }
@@ -98,6 +97,7 @@ app.get('/admin', checkAdminSecret, (req, res) => res.sendFile(path.join(__dirna
 
 // --- API Маршрути ---
 
+// Аутентифікація/реєстрація користувача
 app.post('/api/user/get-or-create', async (req, res) => {
     const { telegram_id, username } = req.body;
     if (!telegram_id) {
@@ -134,6 +134,8 @@ app.post('/api/user/get-or-create', async (req, res) => {
     }
 });
 
+
+// Отримання інвентарю
 app.get('/api/user/inventory', async (req, res) => {
     const { user_id } = req.query;
     if (!user_id) {
@@ -153,6 +155,7 @@ app.get('/api/user/inventory', async (req, res) => {
     }
 });
 
+// Продаж одного предмета
 app.post('/api/user/inventory/sell', async (req, res) => {
     const { user_id, unique_id } = req.body;
     if (!user_id || !unique_id) {
@@ -183,6 +186,7 @@ app.post('/api/user/inventory/sell', async (req, res) => {
     }
 });
 
+// Продаж кількох предметів
 app.post('/api/user/inventory/sell-multiple', async (req, res) => {
     const { user_id, unique_ids } = req.body;
     if (!user_id || !Array.isArray(unique_ids) || unique_ids.length === 0) {
@@ -212,6 +216,7 @@ app.post('/api/user/inventory/sell-multiple', async (req, res) => {
     }
 });
 
+// Відкриття кейсу
 app.post('/api/case/open', async (req, res) => {
     const { user_id, quantity } = req.body;
     const casePrice = 100;
