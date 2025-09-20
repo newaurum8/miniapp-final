@@ -111,7 +111,7 @@ async function initializeDb() {
                 value TEXT
             );
         `);
-        
+
         const settings = [
             { key: 'miner_enabled', value: 'true' },
             { key: 'tower_enabled', value: 'true' },
@@ -156,7 +156,6 @@ async function initializeDb() {
     }
 }
 
-// ... (весь остальной код API маршрутов остается без изменений) ...
 // --- API Маршруты (клиентские) ---
 
 app.post('/api/user/get-or-create', async (req, res) => {
@@ -180,6 +179,27 @@ app.post('/api/user/get-or-create', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+
+app.post('/api/user/update-balance', async (req, res) => {
+    const { telegram_id, balance_change } = req.body;
+    if (!telegram_id || typeof balance_change !== 'number') {
+        return res.status(400).json({ error: 'Неверные данные для обновления баланса' });
+    }
+
+    try {
+        const result = await pool.query(
+            'UPDATE users SET balance = balance + $1 WHERE telegram_id = $2 RETURNING balance',
+            [balance_change, telegram_id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Пользователь не найден' });
+        }
+        res.json({ success: true, newBalance: result.rows[0].balance });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 
 app.get('/api/user/inventory', async (req, res) => {
     const { user_id } = req.query;
@@ -210,19 +230,19 @@ app.post('/api/user/inventory/sell', async (req, res) => {
     try {
         await client.query('BEGIN');
         const itemResult = await client.query(
-            'SELECT i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.id = $1 AND ui.user_id = $2', 
+            'SELECT i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.id = $1 AND ui.user_id = $2',
             [unique_id, user_id]
         );
         if (itemResult.rows.length === 0) {
             throw new Error('Предмет не найден в инвентаре');
         }
         const itemValue = itemResult.rows[0].value;
-        
+
         await client.query("DELETE FROM user_inventory WHERE id = $1", [unique_id]);
         await client.query("UPDATE users SET balance = balance + $1 WHERE id = $2", [itemValue, user_id]);
-        
+
         await client.query('COMMIT');
-        
+
         const userResult = await pool.query("SELECT balance FROM users WHERE id = $1", [user_id]);
         res.json({ success: true, newBalance: userResult.rows[0].balance });
 
@@ -281,13 +301,13 @@ app.post('/api/case/open', async (req, res) => {
 
         const newBalance = user.balance - totalCost;
         const wonItems = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
-        
+
         await client.query("UPDATE users SET balance = $1 WHERE id = $2", [newBalance, user.id]);
-        
+
         for (const item of wonItems) {
             await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [user.id, item.id]);
         }
-        
+
         await client.query('COMMIT');
         res.json({ success: true, newBalance, wonItems });
 
@@ -321,12 +341,12 @@ app.get('/api/contest/current', async (req, res) => {
     try {
         const contestResult = await pool.query(sql, [now]);
         if (contestResult.rows.length === 0) return res.json(null);
-        
+
         const contest = contestResult.rows[0];
 
         const ticketCountResult = await pool.query("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = $1", [contest.id]);
         const ticketCount = ticketCountResult.rows[0];
-        
+
         const { telegram_id } = req.query;
         let userTickets = 0;
         if (telegram_id) {
@@ -351,7 +371,7 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        
+
         const contestResult = await client.query("SELECT * FROM contests WHERE id = $1 AND is_active = TRUE", [contest_id]);
         if (contestResult.rows.length === 0 || contestResult.rows[0].end_time <= Date.now()) {
             throw new Error('Конкурс неактивен или завершен');
@@ -514,7 +534,7 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
 
         await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [winner.user_id, contest.item_id]);
         await client.query("UPDATE contests SET is_active = FALSE, winner_id = $1 WHERE id = $2", [winner.user_id, contestId]);
-        
+
         await client.query('COMMIT');
         res.json({ success: true, winner_telegram_id: winner.telegram_id, message: "Приз зачислен в инвентарь победителя." });
     } catch (err) {
@@ -532,6 +552,3 @@ app.listen(port, () => {
     console.log(`Админ-панель: http://localhost:${port}/admin?secret=${ADMIN_SECRET}`);
     initializeDb();
 });
-
-
-
