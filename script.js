@@ -323,7 +323,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.isSpinning || !STATE.user) return;
         const totalCost = STATE.casePrice * STATE.openQuantity;
         if (STATE.userBalance < totalCost) {
-            updatePriceMessage(); // Обновляем сообщение об ошибке
+            updatePriceMessage();
             return showNotification("Недостаточно средств.");
         }
 
@@ -337,7 +337,7 @@ document.addEventListener('DOMContentLoaded', function() {
             updateBalanceDisplay();
             hideModal(UI.preOpenModal);
 
-            STATE.lastWonItems = result.wonItems;
+            STATE.lastWonItems = result.wonItems; // Теперь здесь будут предметы с uniqueId
             
             STATE.gameHistory.push(...result.wonItems.map(item => ({ ...item, date: new Date(), name: `Выигрыш из кейса` })));
 
@@ -405,6 +405,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // !!! ИЗМЕНЕНИЕ: Логика продажи и закрытия модального окна !!!
     function showResult() {
         UI.resultModal.innerHTML = '';
         const totalValue = STATE.lastWonItems.reduce((sum, item) => sum + item.value, 0);
@@ -426,27 +427,46 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>`;
         UI.resultModal.appendChild(modalContent);
         
-        const finalizeAction = async () => {
+        const finalizeAction = async (shouldLoadInventory = true) => {
             hideModal(UI.resultModal);
             UI.spinView.classList.add('hidden');
             UI.caseView.classList.remove('hidden');
             STATE.isSpinning = false;
-            await loadInventory(); 
+            if (shouldLoadInventory) {
+                await loadInventory();
+            }
         };
 
-        modalContent.querySelector('.close-btn').addEventListener('click', finalizeAction);
+        modalContent.querySelector('.close-btn').addEventListener('click', () => finalizeAction());
         modalContent.querySelector('#result-spin-again-btn').addEventListener('click', () => {
             finalizeAction();
             setTimeout(handleCaseClick, 100);
         });
+        
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async () => {
-            // Эта логика может быть неточной, т.к. uniqueId присваивается базой.
-            // Продажа по одному предмету через sellFromInventory надежнее.
-            showNotification('Продажа... (эта функция может быть неточной)');
-            await finalizeAction();
+            const sellBtn = modalContent.querySelector('#result-sell-btn');
+            sellBtn.disabled = true;
+            sellBtn.textContent = 'Продажа...';
+
+            try {
+                const uniqueIdsToSell = STATE.lastWonItems.map(item => item.uniqueId);
+                const result = await callApi('/api/user/inventory/sell-multiple', 'POST', {
+                    unique_ids: uniqueIdsToSell
+                });
+                STATE.userBalance = result.newBalance;
+                updateBalanceDisplay();
+                showNotification(`Продано на ⭐ ${totalValue.toLocaleString('ru-RU')}`);
+            } catch (error) {
+                console.error("Ошибка при продаже предметов:", error);
+            } finally {
+                // Не загружаем инвентарь заново, т.к. проданных предметов там уже и так не будет
+                await finalizeAction(false); 
+            }
         });
+
         showModal(UI.resultModal);
     }
+
 
     function populateCasePreview() {
         if (!UI.caseContentsPreview) return;
@@ -530,7 +550,7 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.contestTimer.textContent = `${d}д ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} 🕔`;
     }
     
-    // --- ОСТАЛЬНЫЕ ИГРОВЫЕ ФУНКЦИИ ---
+    // ... (остальные игровые функции без изменений) ...
 
     function resetUpgradeState(resetRotation = false) {
         if (!UI.upgradePointer) return;
