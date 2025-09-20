@@ -10,12 +10,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const API_BASE_URL = '';
     
     const usersTableBody = document.querySelector('#users-table tbody');
-    // ... (решта селекторів без змін)
     const caseItemsContainer = document.getElementById('case-items-container');
     const saveCaseBtn = document.getElementById('save-case-btn');
     const gameManagementContainer = document.getElementById('game-management-container');
     const saveSettingsBtn = document.getElementById('save-settings-btn');
-    
     
     const contestItemSelect = document.getElementById('contest-item-select');
     const contestTicketPriceInput = document.getElementById('contest-ticket-price');
@@ -31,23 +29,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchAllAdminData() {
         try {
-            const [users, items, caseItems, settings, contest] = await Promise.all([
-                fetch(`${API_BASE_URL}/api/admin/users?secret=${ADMIN_SECRET_KEY}`).then(res => res.json()),
-                fetch(`${API_BASE_URL}/api/admin/items?secret=${ADMIN_SECRET_KEY}`).then(res => res.json()),
-                fetch(`${API_BASE_URL}/api/admin/case/items?secret=${ADMIN_SECRET_KEY}`).then(res => res.json()),
-                fetch(`${API_BASE_URL}/api/game_settings?secret=${ADMIN_SECRET_KEY}`).then(res => res.json()),
-                fetch(`${API_BASE_URL}/api/contest/current`).then(res => res.json()) 
-            ]);
+            // Завантажуємо дані послідовно, щоб легше було знайти помилку
+            const usersRes = await fetch(`${API_BASE_URL}/api/admin/users?secret=${ADMIN_SECRET_KEY}`);
+            if (!usersRes.ok) throw new Error(`Помилка завантаження користувачів: ${usersRes.statusText}`);
+            const users = await usersRes.json();
+
+            const itemsRes = await fetch(`${API_BASE_URL}/api/admin/items?secret=${ADMIN_SECRET_KEY}`);
+            if (!itemsRes.ok) throw new Error(`Помилка завантаження предметів: ${itemsRes.statusText}`);
+            const items = await itemsRes.json();
+
+            const caseItemsRes = await fetch(`${API_BASE_URL}/api/admin/case/items?secret=${ADMIN_SECRET_KEY}`);
+            if (!caseItemsRes.ok) throw new Error(`Помилка завантаження кейсів: ${caseItemsRes.statusText}`);
+            const caseItems = await caseItemsRes.json();
             
+            const settingsRes = await fetch(`${API_BASE_URL}/api/game_settings?secret=${ADMIN_SECRET_KEY}`);
+            if (!settingsRes.ok) throw new Error(`Помилка завантаження налаштувань: ${settingsRes.statusText}`);
+            const settings = await settingsRes.json();
+
+            const contestRes = await fetch(`${API_BASE_URL}/api/contest/current`);
+            if (!contestRes.ok) throw new Error(`Помилка завантаження конкурсу: ${contestRes.statusText}`);
+            const contest = await contestRes.json();
+            
+            // Якщо все успішно, рендеримо
             renderUsers(users);
-            // ... (решта викликів)
+            
             allPossibleItems = items;
             initialCaseItemIds = new Set(caseItems);
             renderCaseItemsSelection();
-
             
             renderSettings(settings);
-
             
             populateContestItemSelect(items);
             currentContest = contest;
@@ -55,7 +65,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (error) {
             console.error('Помилка при завантаженні даних:', error);
-            alert('Не вдалося завантажити дані для адмін-панелі.');
+            alert(`Не вдалося завантажити дані для адмін-панелі. Помилка: ${error.message}`);
         }
     }
     
@@ -66,8 +76,10 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         users.forEach(user => {
+            // ВИПРАВЛЕННЯ: Тепер таблиця відповідає HTML і даним з API
             const row = document.createElement('tr');
             row.innerHTML = `
+                <td>N/A</td> 
                 <td>${user.telegram_id || 'N/A'}</td>
                 <td>${user.username || 'N/A'}</td>
                 <td><input type="number" class="balance-input" value="${parseFloat(user.balance).toFixed(2)}"></td>
@@ -184,7 +196,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     saveSettingsBtn.addEventListener('click', saveSettings);
-
     
     function populateContestItemSelect(items) {
         contestItemSelect.innerHTML = items.map(item => `<option value="${item.id}">${item.name} (Стоимость: ${item.value})</option>`).join('');
@@ -259,7 +270,5 @@ document.addEventListener('DOMContentLoaded', () => {
     createContestBtn.addEventListener('click', createContest);
     drawWinnerBtn.addEventListener('click', drawWinner);
 
-
-    
     fetchAllAdminData();
 });
