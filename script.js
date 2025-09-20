@@ -14,7 +14,6 @@ document.addEventListener('DOMContentLoaded', function() {
         ticketQuantity: 1,
         possibleItems: [],
         gameSettings: {},
-        // ... (решта STATE без змін)
         upgradeState: {
             yourItem: null,
             desiredItem: null,
@@ -33,7 +32,7 @@ document.addEventListener('DOMContentLoaded', function() {
         slotsState: { isSpinning: false, symbols: [{ name: 'Lemon', imageSrc: 'images/slot_lemon.png' }, { name: 'Cherry', imageSrc: 'images/slot_cherry.png' }, { name: 'Seven', imageSrc: 'images/slot_7.png' }] },
         towerState: { isActive: false, isCashingOut: false, bet: 15, currentLevel: 0, levels: 5, grid: [], payouts: [], multipliers: [1.5, 2.5, 4, 8, 16], nextLevelTimeout: null }
     };
-
+    // ... (решта коду до showResult без змін)
     // --- ОБ'ЄКТ З ЕЛЕМЕНТАМИ DOM ---
     const UI = {};
 
@@ -45,7 +44,8 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.notificationToast.classList.add('visible');
         setTimeout(() => UI.notificationToast.classList.remove('visible'), 3000);
     }
-
+    
+    // --- НОВАЯ ФУНКЦИЯ для вызова API бэкенда мини-приложения ---
     async function callApi(endpoint, method = 'GET', body = null) {
         try {
             const options = {
@@ -54,15 +54,15 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Content-Type': 'application/json',
                 },
             };
-            // Додаємо user.id (внутрішній ID) в усі POST/PUT/DELETE запити
-            if (body && STATE.user && (method === 'POST' || method === 'PUT' || method === 'DELETE')) {
+            if (body && STATE.user) {
+                // Добавляем user_id (внутренний ID) во все POST запросы
                 body.user_id = STATE.user.id;
                 options.body = JSON.stringify(body);
             }
             const response = await fetch(endpoint, options);
             const result = await response.json();
             if (!response.ok) {
-                throw new Error(result.error || 'Помилка сервера');
+                throw new Error(result.error || 'Ошибка сервера');
             }
             return result;
         } catch (error) {
@@ -76,9 +76,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const response = await fetch('/api/user/get-or-create', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     telegram_id: tgUser.id,
                     username: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim()
@@ -87,30 +85,28 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!response.ok) throw new Error('Authentication failed');
             const userData = await response.json();
             STATE.user = userData;
-            // Важливо: баланс з `users` в БД міні-додатку може бути неактуальним.
-            // Краще було б отримувати його з бота при завантаженні, але для простоти поки залишимо так.
-            // Головне, що всі операції йдуть через API бота.
             STATE.userBalance = userData.balance;
             updateBalanceDisplay();
-            await loadInventory();
+            await loadInventory(); 
             loadContestData();
         } catch (error) {
-            console.error("Помилка аутентифікації:", error);
-            showNotification('Не вдалося підключитися до сервера.');
+            console.error("Ошибка аутентификации:", error);
+            showNotification('Не удалось подключиться к серверу.');
         }
     }
-
+    
     async function loadInventory() {
         if (!STATE.user || !STATE.user.id) return;
         try {
             const inventoryData = await callApi(`/api/user/inventory?user_id=${STATE.user.id}`);
             STATE.inventory = inventoryData;
-            renderInventory();
+            renderInventory(); 
         } catch (error) {
-            console.error("Помилка завантаження інвентарю:", error);
+            console.error("Ошибка загрузки инвентаря:", error);
         }
     }
-    // ... (loadTelegramData, inviteFriend, copyInviteLink - без змін)
+
+
     function loadTelegramData() {
         try {
             const tg = window.Telegram.WebApp;
@@ -123,14 +119,14 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (UI.profileId) UI.profileId.textContent = `ID ${user.id}`;
                 authenticateUser(user);
             } else {
-                 console.warn("Дані користувача Telegram не знайдені. Робота в режимі гостя.");
+                 console.warn("Данные пользователя Telegram не найдены. Работа в режиме гостя.");
                  if (UI.profileName) UI.profileName.textContent = "Guest";
                  if (UI.profileId) UI.profileId.textContent = "ID 0";
                  STATE.userBalance = 1000;
                  updateBalanceDisplay();
             }
         } catch (error) {
-            console.error("Не вдалося завантажити дані Telegram:", error);
+            console.error("Не удалось загрузить данные Telegram:", error);
             if (UI.profileName) UI.profileName.textContent = "Guest";
             if (UI.profileId) UI.profileId.textContent = "ID 0";
         }
@@ -166,11 +162,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-
     function updateBalanceDisplay() {
         if (UI.userBalanceElement) UI.userBalanceElement.innerText = Math.round(STATE.userBalance).toLocaleString('ru-RU');
     }
-    // ... (showModal, hideModal, switchView - без змін)
+
     function showModal(modal) {
         if (modal && UI.modalOverlay) {
             modal.classList.add('visible');
@@ -237,7 +232,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!UI.inventoryContent) return;
         UI.inventoryContent.innerHTML = '';
         if (!STATE.inventory || STATE.inventory.length === 0) {
-            UI.inventoryContent.innerHTML = `<p class="inventory-empty-msg">Ваш інвентар порожній</p>`;
+            UI.inventoryContent.innerHTML = `<p class="inventory-empty-msg">Ваш инвентарь пуст</p>`;
             return;
         }
         STATE.inventory.forEach((item) => {
@@ -247,41 +242,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 <img src="${item.imageSrc}" alt="${item.name}">
                 <div class="inventory-item-name">${item.name}</div>
                 <button class="inventory-sell-btn">
-                    Продати за <span class="icon">⭐</span> ${item.value.toLocaleString('ru-RU')}
+                    Продать за <span class="icon">⭐</span> ${item.value.toLocaleString('ru-RU')}
                 </button>
             `;
-            itemEl.querySelector('.inventory-sell-btn').addEventListener('click', (e) => {
-                e.target.disabled = true; // Блокуємо кнопку, щоб уникнути подвійних кліків
-                sellFromInventory(item.uniqueId).finally(() => {
-                    e.target.disabled = false;
-                });
-            });
+            itemEl.querySelector('.inventory-sell-btn').addEventListener('click', () => sellFromInventory(item.uniqueId));
             UI.inventoryContent.appendChild(itemEl);
         });
     }
 
-    // Оновлена функція продажу
     async function sellFromInventory(uniqueId) {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const result = await callApi('/api/user/inventory/sell', 'POST', {
-                unique_id: uniqueId
+            const result = await callApi('/api/user/inventory/sell', 'POST', { 
+                unique_id: uniqueId 
             });
-
+            
             STATE.userBalance = result.newBalance;
             updateBalanceDisplay();
-            await loadInventory(); // Перезавантажуємо інвентар, щоб видалити проданий предмет
-            showNotification('Предмет продано!');
+            await loadInventory();
+            showNotification('Предмет продан!');
+
         } catch (error) {
-            console.error("Помилка під час продажу предмета:", error);
+            console.error("Ошибка при продаже предмета:", error);
         }
     }
-    // ... (renderHistory, handleCaseClick, updatePriceMessage, handleQuantityChange - без змін)
+
     function renderHistory() {
         if (!UI.historyContent) return;
         UI.historyContent.innerHTML = '';
         if (STATE.gameHistory.length === 0) {
-            UI.historyContent.innerHTML = `<p class="inventory-empty-msg">Історія ігор порожня</p>`;
+            UI.historyContent.innerHTML = `<p class="inventory-empty-msg">История игр пуста</p>`;
             return;
         }
         [...STATE.gameHistory].reverse().forEach(entry => {
@@ -313,7 +303,7 @@ document.addEventListener('DOMContentLoaded', function() {
             UI.priceCheckMessage.classList.remove('error');
             UI.startSpinBtn.disabled = false;
         } else {
-            UI.priceCheckMessage.innerHTML = `⭐ ${totalCost.toLocaleString('ru-RU')} (не вистачає ${(totalCost - STATE.userBalance).toLocaleString('ru-RU')})`;
+            UI.priceCheckMessage.innerHTML = `⭐ ${totalCost.toLocaleString('ru-RU')} (не хватает ${(totalCost - STATE.userBalance).toLocaleString('ru-RU')})`;
             UI.priceCheckMessage.classList.add('error');
             UI.startSpinBtn.disabled = true;
         }
@@ -333,27 +323,23 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.isSpinning || !STATE.user) return;
         const totalCost = STATE.casePrice * STATE.openQuantity;
         if (STATE.userBalance < totalCost) {
-            updatePriceMessage();
-            return showNotification("Недостатньо коштів.");
+            updatePriceMessage(); // Обновляем сообщение об ошибке
+            return showNotification("Недостаточно средств.");
         }
 
         try {
             const result = await callApi('/api/case/open', 'POST', {
                 quantity: STATE.openQuantity
             });
-
+            
             STATE.isSpinning = true;
-            STATE.userBalance = result.newBalance;
+            STATE.userBalance = result.newBalance; 
             updateBalanceDisplay();
             hideModal(UI.preOpenModal);
 
-            // Зберігаємо виграні предмети з їхніми унікальними ID
             STATE.lastWonItems = result.wonItems;
-
-            STATE.gameHistory.push(...result.wonItems.map(item => ({ ...item,
-                date: new Date(),
-                name: `Виграш з кейсу`
-            })));
+            
+            STATE.gameHistory.push(...result.wonItems.map(item => ({ ...item, date: new Date(), name: `Выигрыш из кейса` })));
 
             UI.caseView.classList.add('hidden');
             UI.spinView.classList.remove('hidden');
@@ -364,12 +350,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 startHorizontalAnimation();
             }
 
-        } catch (error) {
-            console.error("Помилка відкриття кейсу:", error);
+        } catch(error) {
+            console.error("Ошибка открытия кейса:", error);
             STATE.isSpinning = false;
         }
     }
-    // ... (startHorizontalAnimation, startMultiVerticalAnimation - без змін)
+
     function startHorizontalAnimation() {
         UI.spinnerContainer.classList.remove('hidden');
         UI.multiSpinnerContainer.classList.add('hidden');
@@ -419,7 +405,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Оновлена функція показу результату з робочою кнопкою "Продати все"
+    // Оновлена функція показу результату
     function showResult() {
         UI.resultModal.innerHTML = '';
         const totalValue = STATE.lastWonItems.reduce((sum, item) => sum + item.value, 0);
@@ -440,7 +426,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <button class="primary-button" id="result-spin-again-btn">Крутити ще</button>
             </div>`;
         UI.resultModal.appendChild(modalContent);
-
+        
         const finalizeAction = async (shouldReloadInventory = true) => {
             hideModal(UI.resultModal);
             UI.spinView.classList.add('hidden');
@@ -455,33 +441,45 @@ document.addEventListener('DOMContentLoaded', function() {
         modalContent.querySelector('.close-btn').addEventListener('click', () => finalizeAction());
 
         modalContent.querySelector('#result-spin-again-btn').addEventListener('click', () => {
-            finalizeAction();
+            finalizeAction(true); // Потрібно перезавантажити інвентар, бо предмети залишились
             setTimeout(handleCaseClick, 100);
         });
 
+        // Обробник для кнопки "Продати все"
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async (e) => {
-            e.target.disabled = true;
-            e.target.textContent = 'Продаж...';
+            const sellBtn = e.target;
+            sellBtn.disabled = true;
+            sellBtn.textContent = 'Продаж...';
+
             try {
+                // Збираємо унікальні ID предметів, які щойно виграли
                 const uniqueIdsToSell = STATE.lastWonItems.map(item => item.uniqueId);
+                if (uniqueIdsToSell.length === 0) {
+                     throw new Error("Немає предметів для продажу");
+                }
+
                 const result = await callApi('/api/user/inventory/sell-multiple', 'POST', {
                     unique_ids: uniqueIdsToSell
                 });
+                
                 STATE.userBalance = result.newBalance;
                 updateBalanceDisplay();
                 showNotification(`Предмети продано за ${totalValue} ⭐!`);
-                await finalizeAction(false); // Інвентар вже порожній, не треба перезавантажувати
+
+                // Закриваємо модальне вікно без перезавантаження інвентарю,
+                // оскільки продані предмети там і не з'являлися.
+                await finalizeAction(false); 
             } catch (error) {
                 console.error("Помилка під час пакетного продажу:", error);
-                e.target.disabled = false;
-                e.target.textContent = `Продати все за ⭐ ${totalValue.toLocaleString('ru-RU')}`;
+                sellBtn.disabled = false;
+                sellBtn.innerHTML = `Продати все за ⭐ ${totalValue.toLocaleString('ru-RU')}`;
             }
         });
 
         showModal(UI.resultModal);
     }
-
-    // ... (решта функцій без критичних змін)
+    // ... (решта коду без змін)
+    
     function populateCasePreview() {
         if (!UI.caseContentsPreview) return;
         UI.caseContentsPreview.innerHTML = !STATE.possibleItems || STATE.possibleItems.length === 0
@@ -501,14 +499,14 @@ document.addEventListener('DOMContentLoaded', function() {
             STATE.contest = await response.json();
             updateContestUI();
         } catch (error) {
-            console.error("Не вдалося завантажити дані про конкурс:", error);
+            console.error("Не удалось загрузить данные о конкурсе:", error);
         }
     }
     
     function updateContestUI() {
         if (!UI.buyTicketBtn) return;
         if (!STATE.contest) {
-            if (UI.contestCard) UI.contestCard.innerHTML = '<p>Активних конкурсів немає.</p>';
+            if (UI.contestCard) UI.contestCard.innerHTML = '<p>Активных конкурсов нет.</p>';
             return;
         }
         const { contest } = STATE;
@@ -1076,8 +1074,8 @@ document.addEventListener('DOMContentLoaded', function() {
             applyGameSettings();
             populateCasePreview();
         } catch (error) {
-            console.error('Не вдалося завантажити дані з сервера:', error);
-            showNotification("Помилка завантаження даних з сервера.");
+            console.error('Не удалось загрузить данные с сервера:', error);
+            showNotification("Ошибка загрузки данных с сервера.");
         }
     }
 
@@ -1204,7 +1202,7 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
         init();
     } catch (error) {
-        console.error("Критична помилка під час ініціалізації:", error);
-        document.body.innerHTML = `<div style="color: white; padding: 20px;">Сталася критична помилка: ${error.message}. Будь ласка, перевірте консоль (F12).</div>`;
+        console.error("Критическая ошибка при инициализации:", error);
+        document.body.innerHTML = `<div style="color: white; padding: 20px;">Произошла критическая ошибка: ${error.message}. Пожалуйста, проверьте консоль (F12).</div>`;
     }
 });
