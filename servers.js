@@ -29,8 +29,8 @@ app.use(express.json());
 
 // --- КОНФИГУРАЦИЯ ---
 const ADMIN_SECRET = 'Aurum';
-// !!! ИСПРАВЛЕНИЕ: Установлен ваш публичный URL-адрес Render !!!
-const BOT_API_URL = 'https://mmmmmm-mf64.onrender.com/api/v1/balance/change'; 
+// !!! ИСПРАВЛЕНИЕ: Установлен ваш публичный URL-адрес Python-сервера !!!
+const BOT_API_URL = 'https://server4644.server-vps.com/api/v1/balance/change'; 
 const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY"; // Ваш секретный ключ
 
 // --- Хелпер для отправки запросов к API бота ---
@@ -581,5 +581,7 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
 
 app.listen(port, () => {
     console.log(`Сервер запущен на порту ${port}`);
-    initializeDb().catch(console.error);
+    console.log(`Основной додаток: http://localhost:${port}`);
+    console.log(`Админ-панель: http://localhost:${port}/admin?secret=${ADMIN_SECRET}`);
+    initializeDb();
 });
