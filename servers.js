@@ -6,7 +6,6 @@ const path = require('path');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Ваша строка подключения к базе данных
 const connectionString = 'postgresql://neondb_owner:npg_gFvZxTR7qdw1@ep-round-sound-agieqqp0-pooler.c-2.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
 if (!connectionString) {
@@ -24,11 +23,9 @@ const pool = new Pool({
 app.use(cors());
 app.use(express.json());
 
-// --- ОТДАЧА СТАТИЧЕСКИХ ФАЙЛОВ ---
 app.use(express.static(__dirname));
 app.use('/admin', express.static(path.join(__dirname, 'admin')));
 
-// --- ЗАЩИТА АДМИН-ПАНЕЛИ ---
 const ADMIN_SECRET = 'Aurum';
 
 const checkAdminSecret = (req, res, next) => {
@@ -40,7 +37,6 @@ const checkAdminSecret = (req, res, next) => {
     }
 };
 
-// --- ОСНОВНЫЕ МАРШРУТЫ ---
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
 });
@@ -48,106 +44,6 @@ app.get('/', (req, res) => {
 app.get('/admin', checkAdminSecret, (req, res) => {
     res.sendFile(path.join(__dirname, 'admin', 'index.html'));
 });
-
-// --- ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ---
-async function initializeDb() {
-    const client = await pool.connect();
-    try {
-        console.log('Успешное подключение к базе данных PostgreSQL');
-
-        // Таблица users создается ботом. Этот скрипт создает только зависимые таблицы.
-        
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS items (
-                id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL,
-                "imageSrc" TEXT,
-                value INTEGER NOT NULL
-            );
-        `);
-
-        const items = [
-            { id: 1, name: 'Cigar', imageSrc: 'images/item.png', value: 3170 },
-            { id: 2, name: 'Bear', imageSrc: 'images/item1.png', value: 440 },
-            { id: 3, name: 'Sigmaboy', imageSrc: 'images/case.png', value: 50 },
-            { id: 4, name: 'Lemon', imageSrc: 'images/slot_lemon.png', value: 100 },
-            { id: 5, name: 'Cherry', imageSrc: 'images/slot_cherry.png', value: 200 },
-            { id: 6, name: 'Seven', imageSrc: 'images/slot_7.png', value: 777 }
-        ];
-
-        for (const item of items) {
-            await client.query(
-                `INSERT INTO items (id, name, "imageSrc", value) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING;`,
-                [item.id, item.name, item.imageSrc, item.value]
-            );
-        }
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS user_inventory (
-                id SERIAL PRIMARY KEY,
-                user_id BIGINT NOT NULL,
-                item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE
-            );
-        `);
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS case_items (
-                case_id INTEGER,
-                item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
-                PRIMARY KEY (case_id, item_id)
-            );
-        `);
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS game_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            );
-        `);
-        
-        const settings = [
-            { key: 'miner_enabled', value: 'true' },
-            { key: 'tower_enabled', value: 'true' },
-            { key: 'slots_enabled', value: 'true' },
-            { key: 'coinflip_enabled', value: 'true' },
-            { key: 'rps_enabled', value: 'true' },
-            { key: 'upgrade_enabled', value: 'true' }
-        ];
-
-        for (const s of settings) {
-            await client.query(
-                `INSERT INTO game_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING;`,
-                [s.key, s.value]
-            );
-        }
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS contests (
-                id SERIAL PRIMARY KEY,
-                item_id INTEGER NOT NULL REFERENCES items(id),
-                ticket_price INTEGER NOT NULL,
-                end_time BIGINT NOT NULL,
-                is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                winner_id BIGINT
-            );
-        `);
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS user_tickets (
-                id SERIAL PRIMARY KEY,
-                contest_id INTEGER NOT NULL REFERENCES contests(id),
-                user_id BIGINT NOT NULL,
-                telegram_id BIGINT NOT NULL
-            );
-        `);
-
-        console.log('База данных успешно инициализирована для мини-приложения.');
-    } catch (err) {
-        console.error('Ошибка при инициализации БД:', err);
-    } finally {
-        client.release();
-    }
-}
 
 // --- API Маршруты (клиентские) ---
 
@@ -171,6 +67,7 @@ app.post('/api/user/get-or-create', async (req, res) => {
             return res.status(404).json({ error: "User not found", message: "Пользователь не найден. Пожалуйста, сначала запустите бота командой /start." });
         }
     } catch (err) {
+        console.error(`Error in /api/user/get-or-create: ${err.message}`);
         res.status(500).json({ error: err.message });
     }
 });
@@ -191,16 +88,16 @@ app.post('/api/user/update-balance', async (req, res) => {
         }
         res.json({ success: true, newBalance: parseFloat(result.rows[0].balance_uah) });
     } catch (err) {
+        console.error(`Error in /api/user/update-balance: ${err.message}`);
         res.status(500).json({ error: err.message });
     }
 });
 
 app.get('/api/user/inventory', async (req, res) => {
-    const { user_id } = req.query; // Здесь user_id это telegram_id
+    const { user_id } = req.query;
     if (!user_id) {
         return res.status(400).json({ error: 'user_id является обязательным' });
     }
-
     const sql = `
         SELECT ui.id AS "uniqueId", i.id, i.name, i."imageSrc", i.value
         FROM user_inventory ui
@@ -211,6 +108,7 @@ app.get('/api/user/inventory', async (req, res) => {
         const { rows } = await pool.query(sql, [user_id]);
         res.json(rows || []);
     } catch (err) {
+        console.error(`Error in /api/user/inventory: ${err.message}`);
         res.status(500).json({ error: err.message });
     }
 });
@@ -242,9 +140,32 @@ app.post('/api/user/inventory/sell', async (req, res) => {
 
     } catch (err) {
         await client.query('ROLLBACK');
+        console.error(`Error in /api/user/inventory/sell: ${err.message}`);
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
+    }
+});
+
+app.get('/api/case/items_full', async (req, res) => {
+    try {
+        const sql = `
+            SELECT i.id, i.name, i."imageSrc", i.value
+            FROM items i
+            LEFT JOIN case_items ci ON i.id = ci.item_id
+            WHERE ci.case_id = 1 OR (SELECT COUNT(*) FROM case_items) = 0
+        `;
+        const { rows } = await pool.query(sql);
+
+        if (rows.length > 0) {
+            res.json(rows);
+        } else {
+            const allItemsResult = await pool.query('SELECT id, name, "imageSrc", value FROM items ORDER BY value DESC');
+            res.json(allItemsResult.rows);
+        }
+    } catch (err) {
+        console.error(`Error in /api/case/items_full: ${err.message}`);
+        res.status(500).json({ error: err.message });
     }
 });
 
@@ -286,6 +207,7 @@ app.post('/api/case/open', async (req, res) => {
 
     } catch (err) {
         await client.query('ROLLBACK');
+        console.error(`Error in /api/case/open: ${err.message}`);
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
@@ -298,6 +220,7 @@ app.get('/api/game_settings', async (req, res) => {
         const settings = rows.reduce((acc, row) => ({ ...acc, [row.key]: row.value }), {});
         res.json(settings);
     } catch (err) {
+        console.error(`Error in /api/game_settings: ${err.message}`);
         res.status(500).json({ error: err.message });
     }
 });
@@ -330,6 +253,7 @@ app.get('/api/contest/current', async (req, res) => {
         res.json({ ...contest, ...ticketCount, userTickets });
 
     } catch (err) {
+        console.error(`Error in /api/contest/current: ${err.message}`);
         res.status(500).json({ error: err.message });
     }
 });
@@ -371,6 +295,7 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
 
     } catch (err) {
         await client.query('ROLLBACK');
+        console.error(`Error in /api/contest/buy-ticket: ${err.message}`);
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
@@ -390,7 +315,7 @@ app.get('/api/admin/users', async (req, res) => {
 });
 
 app.post('/api/admin/user/balance', async (req, res) => {
-    const { userId, newBalance } = req.body; // userId теперь это telegram_id
+    const { userId, newBalance } = req.body;
     try {
         const result = await pool.query("UPDATE users SET balance_uah = $1 WHERE user_id = $2", [newBalance, userId]);
         res.json({ success: true, changes: result.rowCount });
@@ -524,5 +449,4 @@ app.listen(port, () => {
     console.log(`Сервер успешно запущен на порту ${port}`);
     console.log(`Основной додаток: http://localhost:${port}`);
     console.log(`Админ-панель: http://localhost:${port}/admin?secret=${ADMIN_SECRET}`);
-    initializeDb();
 });
