@@ -9,7 +9,6 @@ const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Используем переменную окружения для строки подключения
 const connectionString = 'postgresql://neondb_owner:npg_xoO8NXpDn1fy@ep-hidden-sound-a23oyr8a-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
 if (!connectionString) {
@@ -20,7 +19,7 @@ if (!connectionString) {
 const pool = new Pool({
     connectionString: connectionString,
     ssl: {
-        rejectUnauthorized: false // Важная настройка для Render и Supabase
+        rejectUnauthorized: false
     }
 });
 
@@ -29,15 +28,14 @@ app.use(express.json());
 
 // --- КОНФИГУРАЦИЯ ---
 const ADMIN_SECRET = 'Aurum';
-// !!! ИСПРАВЛЕНИЕ: Установлен IP-адрес и порт вашего Python-сервера !!!
 const BOT_API_URL = 'http://91.239.235.200:8000/api/v1/balance/change';
-const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY"; // Ваш секретный ключ
+const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
 
 // --- Хелпер для отправки запросов к API бота ---
 async function changeBalanceInBot(telegramId, delta, reason) {
     const idempotencyKey = uuidv4();
     const body = JSON.stringify({
-        user_id: telegramId, // Отправляем telegram_id
+        user_id: telegramId,
         delta: delta,
         reason: reason
     });
@@ -47,7 +45,6 @@ async function changeBalanceInBot(telegramId, delta, reason) {
         .update(body)
         .digest('hex');
 
-    // Логика повторных попыток для сетевых ошибок
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             const response = await fetch(BOT_API_URL, {
@@ -58,31 +55,26 @@ async function changeBalanceInBot(telegramId, delta, reason) {
                     'X-Signature': signature
                 },
                 body: body,
-                timeout: 7000 // таймаут 7 секунд
+                timeout: 7000
             });
-
             const result = await response.json();
-
             if (!response.ok) {
-                 // Не повторяем попытку при ошибках клиента (4xx)
                 if (response.status >= 400 && response.status < 500) {
-                     throw new Error(result.detail || `Ошибка API бота: ${response.status}`);
+                    throw new Error(result.detail || `Ошибка API бота: ${response.status}`);
                 }
-                 console.warn(`Попытка ${attempt} не удалась. Статус: ${response.status}. Ответ:`, result);
-                 if (attempt === 3) throw new Error(`Ошибка API бота после 3 попыток: ${result.detail || response.status}`);
-                 await new Promise(res => setTimeout(res, 1000 * attempt)); // экспоненциальная задержка
-                 continue;
+                console.warn(`Попытка ${attempt} не удалась. Статус: ${response.status}. Ответ:`, result);
+                if (attempt === 3) throw new Error(`Ошибка API бота после 3 попыток: ${result.detail || response.status}`);
+                await new Promise(res => setTimeout(res, 1000 * attempt));
+                continue;
             }
-
             return result;
         } catch (error) {
-             console.error(`Попытка ${attempt} провалилась с сетевой ошибкой:`, error);
-             if (attempt === 3) throw new Error("Не удалось связаться с сервером бота после нескольких попыток.");
-             await new Promise(res => setTimeout(res, 1000 * attempt));
+            console.error(`Попытка ${attempt} провалилась с сетевой ошибкой:`, error);
+            if (attempt === 3) throw new Error("Не удалось связаться с сервером бота после нескольких попыток.");
+            await new Promise(res => setTimeout(res, 1000 * attempt));
         }
     }
 }
-
 
 // --- ОТДАЧА СТАТИЧЕСКИХ ФАЙЛОВ ---
 app.use(express.static(__dirname));
@@ -101,114 +93,6 @@ const checkAdminSecret = (req, res, next) => {
 // --- ОСНОВНЫЕ МАРШРУТЫ ---
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/admin', checkAdminSecret, (req, res) => res.sendFile(path.join(__dirname, 'admin', 'index.html')));
-
-// --- ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ---
-async function initializeDb() {
-    const client = await pool.connect();
-    try {
-        console.log('Успешное подключение к базе данных PostgreSQL');
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                telegram_id BIGINT UNIQUE,
-                username TEXT,
-                balance INTEGER NOT NULL DEFAULT 1000
-            );
-        `);
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS items (
-                id SERIAL PRIMARY KEY,
-                name TEXT NOT NULL,
-                "imageSrc" TEXT,
-                value INTEGER NOT NULL
-            );
-        `);
-
-        const items = [
-            { id: 1, name: 'Cigar', imageSrc: 'images/item.png', value: 3170 },
-            { id: 2, name: 'Bear', imageSrc: 'images/item1.png', value: 440 },
-            { id: 3, name: 'Sigmaboy', imageSrc: 'images/case.png', value: 50 },
-            { id: 4, name: 'Lemon', imageSrc: 'images/slot_lemon.png', value: 100 },
-            { id: 5, name: 'Cherry', imageSrc: 'images/slot_cherry.png', value: 200 },
-            { id: 6, name: 'Seven', imageSrc: 'images/slot_7.png', value: 777 }
-        ];
-
-        for (const item of items) {
-            await client.query(
-                `INSERT INTO items (id, name, "imageSrc", value) VALUES ($1, $2, $3, $4) ON CONFLICT (id) DO NOTHING;`,
-                [item.id, item.name, item.imageSrc, item.value]
-            );
-        }
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS user_inventory (
-                id SERIAL PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE
-            );
-        `);
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS case_items (
-                case_id INTEGER,
-                item_id INTEGER REFERENCES items(id) ON DELETE CASCADE,
-                PRIMARY KEY (case_id, item_id)
-            );
-        `);
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS game_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            );
-        `);
-        
-        const settings = [
-            { key: 'miner_enabled', value: 'true' },
-            { key: 'tower_enabled', value: 'true' },
-            { key: 'slots_enabled', value: 'true' },
-            { key: 'coinflip_enabled', value: 'true' },
-            { key: 'rps_enabled', value: 'true' },
-            { key: 'upgrade_enabled', value: 'true' }
-        ];
-
-        for (const s of settings) {
-            await client.query(
-                `INSERT INTO game_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING;`,
-                [s.key, s.value]
-            );
-        }
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS contests (
-                id SERIAL PRIMARY KEY,
-                item_id INTEGER NOT NULL REFERENCES items(id),
-                ticket_price INTEGER NOT NULL,
-                end_time BIGINT NOT NULL,
-                is_active BOOLEAN NOT NULL DEFAULT TRUE,
-                winner_id INTEGER REFERENCES users(id)
-            );
-        `);
-
-        await client.query(`
-            CREATE TABLE IF NOT EXISTS user_tickets (
-                id SERIAL PRIMARY KEY,
-                contest_id INTEGER NOT NULL REFERENCES contests(id),
-                user_id INTEGER NOT NULL REFERENCES users(id),
-                telegram_id BIGINT NOT NULL
-            );
-        `);
-
-        console.log('База данных успешно инициализирована.');
-    } catch (err) {
-        console.error('Ошибка при инициализации БД:', err);
-    } finally {
-        client.release();
-    }
-}
-
 
 // --- API Маршруты (клиентские) ---
 
@@ -234,7 +118,6 @@ app.post('/api/user/get-or-create', async (req, res) => {
     }
 });
 
-// !!! НОВЫЙ ЭНДПОИНТ ДЛЯ СИНХРОНИЗАЦИИ ОТ БОТА !!!
 app.post('/api/user/update-balance', async (req, res) => {
     const { telegram_id, newBalance } = req.body;
     if (!telegram_id || newBalance === undefined) {
@@ -256,13 +139,11 @@ app.post('/api/user/update-balance', async (req, res) => {
     }
 });
 
-
 app.get('/api/user/inventory', async (req, res) => {
     const { user_id } = req.query;
     if (!user_id) {
         return res.status(400).json({ error: 'user_id является обязательным' });
     }
-
     const sql = `
         SELECT ui.id AS "uniqueId", i.id, i.name, i."imageSrc", i.value
         FROM user_inventory ui
@@ -278,7 +159,7 @@ app.get('/api/user/inventory', async (req, res) => {
 });
 
 app.post('/api/user/inventory/sell', async (req, res) => {
-    const { user_id, unique_id } = req.body; // user_id здесь это внутренний ID из таблицы users
+    const { user_id, unique_id } = req.body;
     if (!user_id || !unique_id) {
         return res.status(400).json({ error: 'Неверные данные для продажи' });
     }
@@ -292,15 +173,10 @@ app.post('/api/user/inventory/sell', async (req, res) => {
         if (itemResult.rows.length === 0) throw new Error('Предмет не найден в инвентаре');
 
         const { value: itemValue, telegram_id } = itemResult.rows[0];
-
         const botResponse = await changeBalanceInBot(telegram_id, itemValue, `sell_item_${unique_id}`);
-
         await client.query("DELETE FROM user_inventory WHERE id = $1", [unique_id]);
-
         await client.query('COMMIT');
-
         res.json({ success: true, newBalance: botResponse.new_balance });
-
     } catch (err) {
         await client.query('ROLLBACK');
         console.error("Ошибка при продаже предмета:", err);
@@ -309,6 +185,41 @@ app.post('/api/user/inventory/sell', async (req, res) => {
         client.release();
     }
 });
+
+// !!! НОВЫЙ ЭНДПОИНТ ДЛЯ ПРОДАЖИ НЕСКОЛЬКИХ ПРЕДМЕТОВ !!!
+app.post('/api/user/inventory/sell-multiple', async (req, res) => {
+    const { user_id, unique_ids } = req.body;
+    if (!user_id || !Array.isArray(unique_ids) || unique_ids.length === 0) {
+        return res.status(400).json({ error: 'Неверные данные для продажи' });
+    }
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const placeholders = unique_ids.map((_, i) => `$${i + 2}`).join(',');
+        const itemsResult = await client.query(
+            `SELECT SUM(i.value) as "totalValue", u.telegram_id FROM user_inventory ui JOIN items i ON ui.item_id = i.id JOIN users u ON ui.user_id = u.id WHERE ui.id IN (${placeholders}) AND ui.user_id = $1 GROUP BY u.telegram_id`,
+            [user_id, ...unique_ids]
+        );
+
+        if (itemsResult.rows.length === 0) throw new Error('Предметы не найдены в инвентаре');
+
+        const { totalValue, telegram_id } = itemsResult.rows[0];
+        const botResponse = await changeBalanceInBot(telegram_id, parseFloat(totalValue), `sell_multiple_${unique_ids.length}_items`);
+
+        await client.query(`DELETE FROM user_inventory WHERE id IN (${placeholders})`, unique_ids);
+
+        await client.query('COMMIT');
+        res.json({ success: true, newBalance: botResponse.new_balance });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error("Ошибка при продаже нескольких предметов:", err);
+        res.status(500).json({ error: err.message });
+    } finally {
+        client.release();
+    }
+});
+
 
 app.get('/api/case/items_full', async (req, res) => {
     try {
@@ -319,7 +230,6 @@ app.get('/api/case/items_full', async (req, res) => {
             WHERE ci.case_id = 1 OR (SELECT COUNT(*) FROM case_items) = 0
         `;
         const { rows } = await pool.query(sql);
-
         if (rows.length > 0) {
             res.json(rows);
         } else {
@@ -332,7 +242,7 @@ app.get('/api/case/items_full', async (req, res) => {
 });
 
 app.post('/api/case/open', async (req, res) => {
-    const { user_id, quantity } = req.body; // user_id здесь это внутренний ID из таблицы users
+    const { user_id, quantity } = req.body;
     const casePrice = 100;
     const totalCost = casePrice * (quantity || 1);
 
@@ -351,22 +261,23 @@ app.post('/api/case/open', async (req, res) => {
         const botResponse = await changeBalanceInBot(telegram_id, -totalCost, `open_case_x${quantity}`);
 
         const caseItemsResult = await client.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
-        if (caseItemsResult.rows.length === 0) {
-             const allItems = await client.query('SELECT id, name, "imageSrc", value FROM items');
-             if (allItems.rows.length === 0) throw new Error('В игре нет предметов');
-             var caseItems = allItems.rows;
-        } else {
-            var caseItems = caseItemsResult.rows;
+        const caseItems = (caseItemsResult.rows.length > 0) ? caseItemsResult.rows : (await client.query('SELECT id, name, "imageSrc", value FROM items')).rows;
+        if (caseItems.length === 0) throw new Error('В игре нет предметов');
+
+        const wonItemsData = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
+        
+        // !!! ИЗМЕНЕНИЕ: Возвращаем ID из инвентаря !!!
+        const wonItemsWithUniqueIds = [];
+        for (const item of wonItemsData) {
+            const result = await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2) RETURNING id", [user_id, item.id]);
+            wonItemsWithUniqueIds.push({
+                ...item,
+                uniqueId: result.rows[0].id
+            });
         }
-
-        const wonItems = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
-
-        for (const item of wonItems) {
-            await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [user_id, item.id]);
-        }
-
+        
         await client.query('COMMIT');
-        res.json({ success: true, newBalance: botResponse.new_balance, wonItems });
+        res.json({ success: true, newBalance: botResponse.new_balance, wonItems: wonItemsWithUniqueIds });
 
     } catch (err) {
         await client.query('ROLLBACK');
@@ -377,6 +288,8 @@ app.post('/api/case/open', async (req, res) => {
     }
 });
 
+
+// ... (остальные маршруты без изменений) ...
 app.get('/api/game_settings', async (req, res) => {
     try {
         const { rows } = await pool.query("SELECT key, value FROM game_settings");
@@ -399,12 +312,12 @@ app.get('/api/contest/current', async (req, res) => {
     try {
         const contestResult = await pool.query(sql, [now]);
         if (contestResult.rows.length === 0) return res.json(null);
-
+        
         const contest = contestResult.rows[0];
 
         const ticketCountResult = await pool.query("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = $1", [contest.id]);
         const ticketCount = ticketCountResult.rows[0];
-
+        
         const { telegram_id } = req.query;
         let userTickets = 0;
         if (telegram_id) {
@@ -429,7 +342,7 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
+        
         const contestResult = await client.query("SELECT * FROM contests WHERE id = $1 AND is_active = TRUE", [contest_id]);
         if (contestResult.rows.length === 0 || contestResult.rows[0].end_time <= Date.now()) {
             throw new Error('Конкурс неактивен или завершен');
@@ -441,7 +354,7 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
         const user = userResult.rows[0];
 
         const totalCost = contest.ticket_price * quantity;
-
+        
         const botResponse = await changeBalanceInBot(telegram_id, -totalCost, `buy_ticket_x${quantity}_contest_${contest_id}`);
 
         for (let i = 0; i < quantity; i++) {
@@ -471,15 +384,36 @@ app.get('/api/admin/users', async (req, res) => {
     }
 });
 
+// !!! ИЗМЕНЕНИЕ: Админка теперь тоже синхронизирует баланс с ботом !!!
 app.post('/api/admin/user/balance', async (req, res) => {
-    const { userId, newBalance } = req.body;
+    const { userId, newBalance } = req.body; // userId - это внутренний id
+    const client = await pool.connect();
     try {
-        const result = await pool.query("UPDATE users SET balance = $1 WHERE id = $2", [newBalance, userId]);
-        res.json({ success: true, changes: result.rowCount });
+        await client.query('BEGIN');
+        
+        const userResult = await client.query("SELECT telegram_id, balance FROM users WHERE id = $1", [userId]);
+        if (userResult.rows.length === 0) throw new Error('Пользователь не найден');
+        
+        const { telegram_id, balance: oldBalance } = userResult.rows[0];
+        const delta = newBalance - oldBalance;
+
+        // Отправляем дельту (разницу) в бот для корректного учёта
+        await changeBalanceInBot(telegram_id, delta, `admin_balance_change`);
+        
+        // Обновляем баланс в локальной БД
+        await client.query("UPDATE users SET balance = $1 WHERE id = $2", [newBalance, userId]);
+        
+        await client.query('COMMIT');
+        res.json({ success: true });
     } catch (err) {
+        await client.query('ROLLBACK');
+        console.error("Ошибка в /api/admin/user/balance:", err);
         res.status(500).json({ "error": err.message });
+    } finally {
+        client.release();
     }
 });
+
 
 app.get('/api/admin/items', async (req, res) => {
     try {
@@ -590,7 +524,7 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
 
         await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [winner.user_id, contest.item_id]);
         await client.query("UPDATE contests SET is_active = FALSE, winner_id = $1 WHERE id = $2", [winner.user_id, contestId]);
-
+        
         await client.query('COMMIT');
         res.json({ success: true, winner_telegram_id: winner.telegram_id, message: "Приз зачислен в инвентарь победителя." });
     } catch (err) {
@@ -606,5 +540,5 @@ app.listen(port, () => {
     console.log(`Сервер запущен на порту ${port}`);
     console.log(`Основной додаток: http://localhost:${port}`);
     console.log(`Админ-панель: http://localhost:${port}/admin?secret=${ADMIN_SECRET}`);
-    initializeDb();
+    // initializeDb(); // Инициализацию лучше убрать или сделать опциональной, чтобы не запускалась при каждом рестарте
 });
