@@ -29,8 +29,8 @@ app.use(express.json());
 
 // --- КОНФИГУРАЦИЯ ---
 const ADMIN_SECRET = 'Aurum';
-// !!! ВАЖНО: Замените 'http://localhost:8000' на реальный публичный адрес вашего Python-сервера
-const BOT_API_URL = 'http://localhost:8000/api/v1/balance/change';
+// !!! ИСПРАВЛЕНИЕ: Установлен ваш публичный URL-адрес Render !!!
+const BOT_API_URL = 'https://mmmmmm-mf64.onrender.com/api/v1/balance/change'; 
 const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY"; // Ваш секретный ключ
 
 // --- Хелпер для отправки запросов к API бота ---
@@ -328,8 +328,13 @@ app.post('/api/case/open', async (req, res) => {
         const botResponse = await changeBalanceInBot(telegram_id, -totalCost, `open_case_x${quantity}`);
 
         const caseItemsResult = await client.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
-        if (caseItemsResult.rows.length === 0) throw new Error('Кейс пуст');
-        const caseItems = caseItemsResult.rows;
+        if (caseItemsResult.rows.length === 0) {
+             const allItems = await client.query('SELECT id, name, "imageSrc", value FROM items');
+             if (allItems.rows.length === 0) throw new Error('В игре нет предметов');
+             var caseItems = allItems.rows;
+        } else {
+            var caseItems = caseItemsResult.rows;
+        }
 
         const wonItems = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
         
@@ -575,8 +580,6 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
 
 
 app.listen(port, () => {
-    console.log(`Сервер успешно запущен на порту ${port}`);
-    console.log(`Основной додаток: http://localhost:${port}`);
-    console.log(`Админ-панель: http://localhost:${port}/admin?secret=${ADMIN_SECRET}`);
-    initializeDb();
+    console.log(`Сервер запущен на порту ${port}`);
+    initializeDb().catch(console.error);
 });
