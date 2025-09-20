@@ -440,10 +440,8 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(handleCaseClick, 100);
         });
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async () => {
-            const newItemsUniqueIds = STATE.lastWonItems.map(item => item.uniqueId);
-            // Эта логика не совсем корректна, т.к. uniqueId присваивается базой.
-            // Проще просто продать все предметы с такими item.id, которые появились последними.
-            // Но для простоты пока оставим так.
+            // Эта логика может быть неточной, т.к. uniqueId присваивается базой.
+            // Продажа по одному предмету через sellFromInventory надежнее.
             showNotification('Продажа... (эта функция может быть неточной)');
             await finalizeAction();
         });
