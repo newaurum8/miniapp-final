@@ -4,6 +4,7 @@ const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
+const fetch = require('node-fetch');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -26,13 +27,68 @@ const pool = new Pool({
 app.use(cors());
 app.use(express.json());
 
+// --- КОНФИГУРАЦИЯ ---
+const ADMIN_SECRET = 'Aurum';
+// !!! ВАЖНО: Замените 'http://localhost:8000' на реальный публичный адрес вашего Python-сервера
+const BOT_API_URL = 'http://localhost:8000/api/v1/balance/change'; 
+const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY"; // Ваш секретный ключ
+
+// --- Хелпер для отправки запросов к API бота ---
+async function changeBalanceInBot(telegramId, delta, reason) {
+    const idempotencyKey = uuidv4();
+    const body = JSON.stringify({
+        user_id: telegramId, // Отправляем telegram_id
+        delta: delta,
+        reason: reason
+    });
+
+    const signature = crypto
+        .createHmac('sha256', MINI_APP_SECRET_KEY)
+        .update(body)
+        .digest('hex');
+
+    // Логика повторных попыток для сетевых ошибок
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            const response = await fetch(BOT_API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Idempotency-Key': idempotencyKey,
+                    'X-Signature': signature
+                },
+                body: body,
+                timeout: 7000 // таймаут 7 секунд
+            });
+
+            const result = await response.json();
+
+            if (!response.ok) {
+                 // Не повторяем попытку при ошибках клиента (4xx)
+                if (response.status >= 400 && response.status < 500) {
+                     throw new Error(result.detail || `Ошибка API бота: ${response.status}`);
+                }
+                 console.warn(`Попытка ${attempt} не удалась. Статус: ${response.status}. Ответ:`, result);
+                 if (attempt === 3) throw new Error(`Ошибка API бота после 3 попыток: ${result.detail || response.status}`);
+                 await new Promise(res => setTimeout(res, 1000 * attempt)); // экспоненциальная задержка
+                 continue;
+            }
+
+            return result;
+        } catch (error) {
+             console.error(`Попытка ${attempt} провалилась с сетевой ошибкой:`, error);
+             if (attempt === 3) throw new Error("Не удалось связаться с сервером бота после нескольких попыток.");
+             await new Promise(res => setTimeout(res, 1000 * attempt));
+        }
+    }
+}
+
+
 // --- ОТДАЧА СТАТИЧЕСКИХ ФАЙЛОВ ---
 app.use(express.static(__dirname));
 app.use('/admin', express.static(path.join(__dirname, 'admin')));
 
 // --- ЗАЩИТА АДМИН-ПАНЕЛИ ---
-const ADMIN_SECRET = 'Aurum';
-
 const checkAdminSecret = (req, res, next) => {
     const secret = req.query.secret || req.body.secret;
     if (secret === ADMIN_SECRET) {
@@ -43,13 +99,8 @@ const checkAdminSecret = (req, res, next) => {
 };
 
 // --- ОСНОВНЫЕ МАРШРУТЫ ---
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-app.get('/admin', checkAdminSecret, (req, res) => {
-    res.sendFile(path.join(__dirname, 'admin', 'index.html'));
-});
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+app.get('/admin', checkAdminSecret, (req, res) => res.sendFile(path.join(__dirname, 'admin', 'index.html')));
 
 // --- ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ---
 async function initializeDb() {
@@ -158,7 +209,7 @@ async function initializeDb() {
     }
 }
 
-// ... (весь остальной код API маршрутов остается без изменений) ...
+
 // --- API Маршруты (клиентские) ---
 
 app.post('/api/user/get-or-create', async (req, res) => {
@@ -204,7 +255,7 @@ app.get('/api/user/inventory', async (req, res) => {
 });
 
 app.post('/api/user/inventory/sell', async (req, res) => {
-    const { user_id, unique_id } = req.body;
+    const { user_id, unique_id } = req.body; // user_id здесь это внутренний ID из таблицы users
     if (!user_id || !unique_id) {
         return res.status(400).json({ error: 'Неверные данные для продажи' });
     }
@@ -212,50 +263,29 @@ app.post('/api/user/inventory/sell', async (req, res) => {
     try {
         await client.query('BEGIN');
         const itemResult = await client.query(
-            'SELECT i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.id = $1 AND ui.user_id = $2', 
+            'SELECT i.value, u.telegram_id FROM user_inventory ui JOIN items i ON ui.item_id = i.id JOIN users u ON ui.user_id = u.id WHERE ui.id = $1 AND ui.user_id = $2', 
             [unique_id, user_id]
         );
-        if (itemResult.rows.length === 0) {
-            throw new Error('Предмет не найден в инвентаре');
-        }
-        const itemValue = itemResult.rows[0].value;
+        if (itemResult.rows.length === 0) throw new Error('Предмет не найден в инвентаре');
+        
+        const { value: itemValue, telegram_id } = itemResult.rows[0];
+        
+        const botResponse = await changeBalanceInBot(telegram_id, itemValue, `sell_item_${unique_id}`);
         
         await client.query("DELETE FROM user_inventory WHERE id = $1", [unique_id]);
         
-        // --- ИЗМЕНЕНИЕ: Отправляем запрос на изменение баланса в бот ---
-        const idempotencyKey = uuidv4();
-        const response = await fetch('http://localhost:8000/api/v1/balance/change', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Idempotency-Key': idempotencyKey,
-                // Добавьте заголовок авторизации, если вы его используете
-                // 'Authorization': `Bearer ${YOUR_JWT_TOKEN}` 
-            },
-            body: JSON.stringify({
-                user_id: user_id,
-                delta: itemValue,
-                reason: 'sell_item'
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error('Ошибка при изменении баланса через API бота');
-        }
-        
         await client.query('COMMIT');
         
-        const userResult = await pool.query("SELECT balance FROM users WHERE id = $1", [user_id]);
-        res.json({ success: true, newBalance: userResult.rows[0].balance });
+        res.json({ success: true, newBalance: botResponse.new_balance });
 
     } catch (err) {
         await client.query('ROLLBACK');
+        console.error("Ошибка при продаже предмета:", err);
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
     }
 });
-
 
 app.get('/api/case/items_full', async (req, res) => {
     try {
@@ -279,7 +309,7 @@ app.get('/api/case/items_full', async (req, res) => {
 });
 
 app.post('/api/case/open', async (req, res) => {
-    const { user_id, quantity } = req.body;
+    const { user_id, quantity } = req.body; // user_id здесь это внутренний ID из таблицы users
     const casePrice = 100;
     const totalCost = casePrice * (quantity || 1);
 
@@ -290,49 +320,29 @@ app.post('/api/case/open', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
-        const userResult = await client.query("SELECT id, balance FROM users WHERE id = $1 FOR UPDATE", [user_id]);
+        
+        const userResult = await client.query("SELECT telegram_id FROM users WHERE id = $1", [user_id]);
         if (userResult.rows.length === 0) throw new Error('Пользователь не найден');
-        const user = userResult.rows[0];
+        const { telegram_id } = userResult.rows[0];
 
-        if (user.balance < totalCost) throw new Error('Недостаточно средств');
+        const botResponse = await changeBalanceInBot(telegram_id, -totalCost, `open_case_x${quantity}`);
 
         const caseItemsResult = await client.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
         if (caseItemsResult.rows.length === 0) throw new Error('Кейс пуст');
         const caseItems = caseItemsResult.rows;
 
-        // --- ИЗМЕНЕНИЕ: Отправляем запрос на изменение баланса в бот ---
-        const idempotencyKey = uuidv4();
-        const response = await fetch('http://localhost:8000/api/v1/balance/change', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Idempotency-Key': idempotencyKey,
-                 // 'Authorization': `Bearer ${YOUR_JWT_TOKEN}` 
-            },
-            body: JSON.stringify({
-                user_id: user_id,
-                delta: -totalCost,
-                reason: 'open_case'
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error('Ошибка при изменении баланса через API бота');
-        }
-        
         const wonItems = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
         
         for (const item of wonItems) {
-            await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [user.id, item.id]);
+            await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [user_id, item.id]);
         }
         
         await client.query('COMMIT');
-        const updatedUserResult = await pool.query("SELECT balance FROM users WHERE id = $1", [user_id]);
-        res.json({ success: true, newBalance: updatedUserResult.rows[0].balance, wonItems });
+        res.json({ success: true, newBalance: botResponse.new_balance, wonItems });
 
     } catch (err) {
         await client.query('ROLLBACK');
+        console.error("Ошибка открытия кейса:", err);
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
@@ -398,40 +408,20 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
         }
         const contest = contestResult.rows[0];
 
-        const userResult = await client.query("SELECT id, balance FROM users WHERE telegram_id = $1 FOR UPDATE", [telegram_id]);
+        const userResult = await client.query("SELECT id FROM users WHERE telegram_id = $1", [telegram_id]);
         if (userResult.rows.length === 0) throw new Error('Пользователь не найден');
         const user = userResult.rows[0];
 
         const totalCost = contest.ticket_price * quantity;
-        if (user.balance < totalCost) throw new Error('Недостаточно средств');
         
-        // --- ИЗМЕНЕНИЕ: Отправляем запрос на изменение баланса в бот ---
-        const idempotencyKey = uuidv4();
-        const response = await fetch('http://localhost:8000/api/v1/balance/change', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Idempotency-Key': idempotencyKey,
-                 // 'Authorization': `Bearer ${YOUR_JWT_TOKEN}` 
-            },
-            body: JSON.stringify({
-                user_id: user.id,
-                delta: -totalCost,
-                reason: 'buy_ticket'
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error('Ошибка при изменении баланса через API бота');
-        }
+        const botResponse = await changeBalanceInBot(telegram_id, -totalCost, `buy_ticket_x${quantity}_contest_${contest_id}`);
 
         for (let i = 0; i < quantity; i++) {
             await client.query("INSERT INTO user_tickets (contest_id, user_id, telegram_id) VALUES ($1, $2, $3)", [contest_id, user.id, telegram_id]);
         }
 
         await client.query('COMMIT');
-        const updatedUserResult = await pool.query("SELECT balance FROM users WHERE id = $1", [user.id]);
-        res.json({ success: true, newBalance: updatedUserResult.rows[0].balance });
+        res.json({ success: true, newBalance: botResponse.new_balance });
 
     } catch (err) {
         await client.query('ROLLBACK');
