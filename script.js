@@ -87,8 +87,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         try {
             // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-            // Указываем HTTPS-адрес вашего VDS без порта
-            const response = await fetch('https://server4644.server-vps.com/api/v1/balance/change', {
+            // Возвращаем на HTTP с IP-адресом и портом
+            const response = await fetch('http://91.239.235.200:8000/api/v1/balance/change', {
             // --- КОНЕЦ ИЗМЕНЕНИЯ ---
                 method: 'POST',
                 headers: {
@@ -112,7 +112,6 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Ошибка синхронизации баланса:', error);
             showNotification(error.message || 'Ошибка синхронизации баланса с ботом.');
-            // В случае ошибки синхронизации, перезапрашиваем актуальные данные пользователя
             await authenticateUser(window.Telegram.WebApp.initDataUnsafe.user);
             return false;
         }
