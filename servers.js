@@ -157,13 +157,10 @@ app.post('/api/user/inventory/sell', async (req, res) => {
             [unique_id, user_id]
         );
         if (itemResult.rows.length === 0) throw new Error('Предмет не знайдено в інвентарі');
-
         const { value: itemValue } = itemResult.rows[0];
         const botResponse = await changeBalanceInBot(user_id, itemValue, `sell_item_${unique_id}`);
-
         await client.query("DELETE FROM user_inventory WHERE id = $1", [unique_id]);
         await client.query('COMMIT');
-
         res.json({ success: true, newBalance: botResponse.new_balance });
     } catch (err) {
         await client.query('ROLLBACK');
@@ -257,15 +254,13 @@ app.get('/api/game_settings', async (req, res) => {
     }
 });
 
-// ### ВІДНОВЛЕНІ МАРШРУТИ ДЛЯ КОНКУРСІВ ###
 app.get('/api/contest/current', async (req, res) => {
     const now = Date.now();
+    const { telegram_id } = req.query;
     const sql = `
         SELECT c.id, c.end_time, c.ticket_price, c.winner_id, i.name AS "itemName", i."imageSrc" AS "itemImageSrc"
-        FROM contests c
-        JOIN items i ON c.item_id = i.id
-        WHERE c.is_active = TRUE AND c.end_time > $1
-        ORDER BY c.id DESC LIMIT 1
+        FROM contests c JOIN items i ON c.item_id = i.id
+        WHERE c.is_active = TRUE AND c.end_time > $1 ORDER BY c.id DESC LIMIT 1
     `;
     try {
         const contestResult = await pool.query(sql, [now]);
@@ -273,22 +268,22 @@ app.get('/api/contest/current', async (req, res) => {
         
         const contest = contestResult.rows[0];
         const ticketCountResult = await pool.query("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = $1", [contest.id]);
-        const ticketCount = ticketCountResult.rows[0];
         
-        const { telegram_id } = req.query;
         let userTickets = 0;
         if (telegram_id) {
-            const userTicketsResult = await pool.query("SELECT COUNT(*) AS count FROM user_tickets WHERE contest_id = $1 AND user_id = $2", [contest.id, telegram_id]);
+            const userTicketsResult = await pool.query("SELECT COUNT(*) FROM user_tickets WHERE contest_id = $1 AND user_id = $2", [contest.id, telegram_id]);
             userTickets = Number(userTicketsResult.rows[0].count);
         }
-        res.json({ ...contest, ...ticketCount, userTickets });
+        res.json({ ...contest, ...ticketCountResult.rows[0], userTickets });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
+// ### ВИПРАВЛЕНИЙ МАРШРУТ ПОКУПКИ КВИТКА ###
 app.post('/api/contest/buy-ticket', async (req, res) => {
-    const { user_id, quantity } = req.body;
+    // user_id з фронтенду - це telegram_id
+    const { user_id, quantity } = req.body; 
     if (!user_id || !quantity || quantity < 1) {
         return res.status(400).json({ error: 'Неверные данные для покупки билета' });
     }
@@ -301,20 +296,24 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
         }
         const contest = contestResult.rows[0];
         const totalCost = contest.ticket_price * quantity;
+        
+        // Викликаємо API бота з правильним telegram_id
         const botResponse = await changeBalanceInBot(user_id, -totalCost, `buy_ticket_x${quantity}_contest_${contest.id}`);
+
         for (let i = 0; i < quantity; i++) {
-            await client.query("INSERT INTO user_tickets (contest_id, user_id) VALUES ($1, $2)", [contest.id, user_id]);
+            // Вставляємо в таблицю user_id (telegram_id) та telegram_id
+            await client.query("INSERT INTO user_tickets (contest_id, user_id, telegram_id) VALUES ($1, $2, $3)", [contest.id, user_id, user_id]);
         }
         await client.query('COMMIT');
         res.json({ success: true, newBalance: botResponse.new_balance });
     } catch (err) {
         await client.query('ROLLBACK');
+        console.error("Помилка при покупці квитка:", err);
         res.status(500).json({ error: err.message });
     } finally {
         client.release();
     }
 });
-// ### КІНЕЦЬ ВІДНОВЛЕНИХ МАРШРУТІВ ###
 
 // --- Адмінські маршрути ---
 app.use('/api/admin', checkAdminSecret);
@@ -411,7 +410,6 @@ app.post('/api/admin/game_settings', async (req, res) => {
     }
 });
 
-// ### ВІДНОВЛЕНІ АДМІНСЬКІ МАРШРУТИ ДЛЯ КОНКУРСІВ ###
 app.post('/api/admin/contest/create', async (req, res) => {
     const { item_id, ticket_price, duration_hours } = req.body;
     if (!item_id || !ticket_price || !duration_hours) {
@@ -446,7 +444,6 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
             throw new Error('Активный конкурс не найден');
         }
         const contest = contestResult.rows[0];
-
         const participantsResult = await client.query("SELECT DISTINCT user_id FROM user_tickets WHERE contest_id = $1", [contestId]);
         if (participantsResult.rows.length === 0) {
             await client.query("UPDATE contests SET is_active = FALSE WHERE id = $1", [contestId]);
@@ -455,13 +452,10 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
         }
         const participants = participantsResult.rows;
         const winner = participants[Math.floor(Math.random() * participants.length)];
-
         await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [winner.user_id, contest.item_id]);
         await client.query("UPDATE contests SET is_active = FALSE, winner_id = $1 WHERE id = $2", [winner.user_id, contestId]);
-        
         const winnerTelegramIdResult = await client.query("SELECT user_id FROM users WHERE user_id = $1", [winner.user_id]);
         const winnerTelegramId = winnerTelegramIdResult.rows[0].user_id;
-
         await client.query('COMMIT');
         res.json({ success: true, winner_telegram_id: winnerTelegramId, message: "Приз зачислен в инвентарь победителя." });
     } catch (err) {
@@ -471,7 +465,6 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
         client.release();
     }
 });
-// ### КІНЕЦЬ ВІДНОВЛЕНИХ АДМІНСЬКИХ МАРШРУТІВ ###
 
 app.listen(port, () => {
     console.log(`Сервер запущен на порту ${port}`);
