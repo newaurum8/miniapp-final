@@ -464,4 +464,3 @@ app.listen(port, () => {
     console.log(`Сервер успешно запущен на порту ${port}`);
     checkDbConnection();
 });
-
