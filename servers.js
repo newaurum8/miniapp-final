@@ -73,10 +73,9 @@ app.post('/api/user/get-or-create', async (req, res) => {
     try {
         let userResult = await pool.query("SELECT user_id, username, balance_uah FROM users WHERE user_id = $1", [telegram_id]);
         
-        // ИСПРАВЛЕНИЕ: Явно преобразуем ID в число, чтобы избежать проблем с типами данных.
         const formatUser = (dbUser) => ({
             id: Number(dbUser.user_id),
-            telegram_id: Number(dbUser.user_id), // Убедимся, что это число
+            telegram_id: Number(dbUser.user_id),
             username: dbUser.username,
             balance: parseFloat(dbUser.balance_uah)
         });
@@ -101,10 +100,6 @@ app.post('/api/user/get-or-create', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
-// ### УДАЛЕННЫЙ БЛОК ###
-// Маршрут /api/v1/balance/change был удален отсюда, 
-// так как его логика теперь полностью находится в webhook_handler.py
 
 app.get('/api/user/inventory', async (req, res) => {
     const { user_id } = req.query;
@@ -269,8 +264,14 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
     try {
         await client.query('BEGIN');
         
+        const userResult = await client.query("SELECT user_id FROM users WHERE user_id = $1", [telegram_id]);
+        if (userResult.rows.length === 0) {
+            throw new Error("Пользователь не найден");
+        }
+        const internalUserId = userResult.rows[0].user_id;
+
         for (let i = 0; i < quantity; i++) {
-            await client.query("INSERT INTO user_tickets (contest_id, user_id, telegram_id) VALUES ($1, $2, $3)", [contest_id, telegram_id, telegram_id]);
+            await client.query("INSERT INTO user_tickets (contest_id, user_id, telegram_id) VALUES ($1, $2, $3)", [contest_id, internalUserId, telegram_id]);
         }
 
         await client.query('COMMIT');
@@ -297,10 +298,18 @@ app.get('/api/admin/users', async (req, res) => {
 });
 
 app.post('/api/admin/user/balance', async (req, res) => {
-    const { userId, newBalance } = req.body;
+    const { telegramId, newBalance } = req.body;
     try {
-        const result = await pool.query("UPDATE users SET balance_uah = $1 WHERE user_id = $2", [newBalance, userId]);
-        res.json({ success: true, changes: result.rowCount });
+        const result = await pool.query(
+            "UPDATE users SET balance_uah = $1 WHERE user_id = $2 RETURNING balance_uah",
+            [newBalance, telegramId]
+        );
+        
+        if (result.rowCount > 0) {
+            res.json({ success: true, newBalance: parseFloat(result.rows[0].balance_uah) });
+        } else {
+            res.status(404).json({ success: false, error: "Пользователь не найден" });
+        }
     } catch (err) {
         res.status(500).json({ "error": err.message });
     }
