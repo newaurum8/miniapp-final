@@ -1,4 +1,7 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // --- ИЗМЕНЕНИЕ: Указываем полный URL вашего сервера на Render ---
+    const API_BASE_URL = 'https://mmmmmm-mf64.onrender.com';
+
     const params = new URLSearchParams(window.location.search);
     const ADMIN_SECRET_KEY = params.get('secret');
 
@@ -7,8 +10,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
 
-    const API_BASE_URL = '';
-    
     const usersTableBody = document.querySelector('#users-table tbody');
     const caseItemsContainer = document.getElementById('case-items-container');
     const saveCaseBtn = document.getElementById('save-case-btn');
@@ -29,7 +30,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function fetchAllAdminData() {
         try {
-            // Завантажуємо дані послідовно, щоб легше було знайти помилку
             const usersRes = await fetch(`${API_BASE_URL}/api/admin/users?secret=${ADMIN_SECRET_KEY}`);
             if (!usersRes.ok) throw new Error(`Помилка завантаження користувачів: ${usersRes.statusText}`);
             const users = await usersRes.json();
@@ -46,19 +46,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!settingsRes.ok) throw new Error(`Помилка завантаження налаштувань: ${settingsRes.statusText}`);
             const settings = await settingsRes.json();
 
-            const contestRes = await fetch(`${API_BASE_URL}/api/contest/current`);
+            const contestRes = await fetch(`${API_BASE_URL}/api/contest/current?secret=${ADMIN_SECRET_KEY}`);
             if (!contestRes.ok) throw new Error(`Помилка завантаження конкурсу: ${contestRes.statusText}`);
             const contest = await contestRes.json();
             
-            // Якщо все успішно, рендеримо
             renderUsers(users);
-            
             allPossibleItems = items;
             initialCaseItemIds = new Set(caseItems);
             renderCaseItemsSelection();
-            
             renderSettings(settings);
-            
             populateContestItemSelect(items);
             currentContest = contest;
             renderCurrentContest();
@@ -72,14 +68,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderUsers(users) {
         usersTableBody.innerHTML = '';
         if (!users || users.length === 0) {
-            usersTableBody.innerHTML = '<tr><td colspan="4">Користувачі ще не зареєстровані.</td></tr>';
+            usersTableBody.innerHTML = '<tr><td colspan="5">Користувачі ще не зареєстровані.</td></tr>';
             return;
         }
         users.forEach(user => {
-            // ВИПРАВЛЕННЯ: Тепер таблиця відповідає HTML і даним з API
             const row = document.createElement('tr');
             row.innerHTML = `
-                <td>N/A</td> 
+                <td>${user.id}</td> 
                 <td>${user.telegram_id || 'N/A'}</td>
                 <td>${user.username || 'N/A'}</td>
                 <td><input type="number" class="balance-input" value="${parseFloat(user.balance).toFixed(2)}"></td>
@@ -94,7 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const response = await fetch(`${API_BASE_URL}/api/admin/user/balance?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ telegramId: telegramId, newBalance: newBalance })
+                body: JSON.stringify({ telegramId: Number(telegramId), newBalance: newBalance })
             });
             const result = await response.json();
             if (response.ok && result.success) {
@@ -123,7 +118,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
-    // ... (решта JS для адмінки без змін)
     function renderCaseItemsSelection() {
         caseItemsContainer.innerHTML = '';
         allPossibleItems.forEach(item => {
@@ -132,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
             label.className = 'item-label';
             label.innerHTML = `
                 <input type="checkbox" data-itemid="${item.id}" ${isChecked ? 'checked' : ''}>
-                <img src="/${item.imageSrc}" alt="${item.name}">
+                <img src="${item.imageSrc}" alt="${item.name}">
                 <span>${item.name}</span>
             `;
             caseItemsContainer.appendChild(label);
@@ -156,7 +150,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     saveCaseBtn.addEventListener('click', saveCaseItems);
     
-    
     const gameNames = {
         'miner_enabled': 'Минер', 'tower_enabled': 'Башня', 'slots_enabled': 'Слоты',
         'coinflip_enabled': 'Орел и Решка', 'rps_enabled': 'К-Н-Б', 'upgrade_enabled': 'Апгрейды'
@@ -178,12 +171,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function saveSettings() {
-         const settingsToSave = {};
+        const settingsToSave = {};
         gameManagementContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
             settingsToSave[cb.dataset.key] = cb.checked;
         });
         try {
-             const response = await fetch(`${API_BASE_URL}/api/admin/game_settings?secret=${ADMIN_SECRET_KEY}`, {
+            const response = await fetch(`${API_BASE_URL}/api/admin/game_settings?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ settings: settingsToSave })
@@ -191,8 +184,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) throw new Error('Ошибка сохранения');
             alert('Настройки игр сохранены!');
         } catch (error) {
-             console.error('Ошибка:', error);
-             alert('Не удалось сохранить настройки.');
+            console.error('Ошибка:', error);
+            alert('Не удалось сохранить настройки.');
         }
     }
     saveSettingsBtn.addEventListener('click', saveSettings);
@@ -220,9 +213,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function createContest() {
         const contestData = {
-            item_id: contestItemSelect.value,
-            ticket_price: contestTicketPriceInput.value,
-            duration_hours: contestDurationInput.value
+            item_id: parseInt(contestItemSelect.value),
+            ticket_price: parseInt(contestTicketPriceInput.value),
+            duration_hours: parseInt(contestDurationInput.value)
         };
 
         try {
@@ -249,7 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         try {
-             const response = await fetch(`${API_BASE_URL}/api/admin/contest/draw/${currentContest.id}?secret=${ADMIN_SECRET_KEY}`, {
+            const response = await fetch(`${API_BASE_URL}/api/admin/contest/draw/${currentContest.id}?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST'
             });
             const result = await response.json();
