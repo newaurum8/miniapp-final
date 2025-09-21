@@ -73,8 +73,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // ========== ПОЛНОСТЬЮ ПЕРЕРАБОТАННАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ ==========
     async function updateBalanceOnServer(delta, reason) {
-        if (!STATE.user || !STATE.user.telegram_id) {
-            console.error("updateBalanceOnServer FAILED: User object or user.telegram_id is missing.", STATE.user);
+        if (!STATE.user || typeof STATE.user.telegram_id !== 'number') {
+            console.error("updateBalanceOnServer FAILED: User object or user.telegram_id is not a valid number.", STATE.user);
             showNotification('Ошибка: Пользователь не авторизован.');
             return false;
         }
