@@ -60,7 +60,7 @@ document.addEventListener('DOMContentLoaded', function() {
             STATE.user = userData;
             STATE.userBalance = userData.balance;
             updateBalanceDisplay();
-            await loadInventory(); // <-- ВАЖНО: Загружаем инвентарь после входа
+            await loadInventory();
             loadContestData();
         } catch (error) {
             console.error("Ошибка аутентификации:", error);
@@ -70,33 +70,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // ========== ИЗМЕНЁННАЯ ФУНКЦИЯ ==========
     async function updateBalanceOnServer(delta, reason) {
-        if (!STATE.user || !STATE.user.telegram_id) {
+        if (!STATE.user || !STATE.user.id) { // Используем ID из объекта user, который возвращает servers.js
             console.error("Пользователь не авторизован для обновления баланса на сервере.");
             return false;
         }
 
-        const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
-        const body = JSON.stringify({
-            user_id: STATE.user.telegram_id,
-            delta: delta,
-            reason: reason
-        });
-
-        const signature = CryptoJS.HmacSHA256(body, MINI_APP_SECRET_KEY).toString(CryptoJS.enc.Hex);
-        const idempotencyKey = crypto.randomUUID();
-
         try {
             // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-            // Возвращаем на HTTP с IP-адресом и портом
-            const response = await fetch('http://91.239.235.200:8000/api/v1/balance/change', {
+            // Убираем сложный запрос на другой сервер и используем простой относительный путь,
+            // который будет обрабатываться вашим файлом servers.js
+            const response = await fetch('/api/v1/balance/change', {
             // --- КОНЕЦ ИЗМЕНЕНИЯ ---
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Signature': signature,
-                    'X-Idempotency-Key': idempotencyKey
                 },
-                body: body
+                body: JSON.stringify({
+                    user_id: STATE.user.id, // Отправляем ID, который получили от servers.js
+                    delta: delta
+                })
             });
 
             const result = await response.json();
@@ -111,7 +103,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         } catch (error) {
             console.error('Ошибка синхронизации баланса:', error);
-            showNotification(error.message || 'Ошибка синхронизации баланса с ботом.');
+            showNotification(error.message || 'Ошибка синхронизации баланса.');
             await authenticateUser(window.Telegram.WebApp.initDataUnsafe.user);
             return false;
         }
@@ -119,7 +111,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // =======================================
 
 
-    // --- НОВАЯ ФУНКЦИЯ ЗАГРУЗКИ ИНВЕНТАРЯ ---
     async function loadInventory() {
         if (!STATE.user || !STATE.user.id) return;
         try {
@@ -127,7 +118,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!response.ok) throw new Error('Could not fetch inventory');
             const inventoryData = await response.json();
             STATE.inventory = inventoryData;
-            renderInventory(); // Перерисовываем инвентарь с новыми данными
+            renderInventory();
         } catch (error) {
             console.error("Ошибка загрузки инвентаря:", error);
         }
@@ -245,9 +236,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        // --- ОБНОВЛЕНИЕ ДАННЫХ ПРИ ПЕРЕКЛЮЧЕНИИ ---
         if (viewId === 'profile-view') {
-            loadInventory(); // <-- Обновляем инвентарь при переходе на профиль
+            loadInventory();
             renderHistory();
         }
         if (viewId === 'upgrade-view') resetUpgradeState(true);
@@ -291,7 +281,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             STATE.userBalance = result.newBalance;
             updateBalanceDisplay();
-            await loadInventory(); // <-- Перезагружаем инвентарь после продажи
+            await loadInventory();
             showNotification('Предмет продан!');
 
         } catch (error) {
@@ -373,7 +363,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             STATE.lastWonItems = result.wonItems;
 
-            // Локально добавляем историю, чтобы не делать лишний запрос
             STATE.gameHistory.push(...result.wonItems.map(item => ({ ...item, date: new Date(), name: `Выигрыш из кейса` })));
 
             UI.caseView.classList.add('hidden');
@@ -398,7 +387,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const reelLength = 60, winnerIndex = 50;
         const reel = Array.from({ length: reelLength }, (_, i) => i === winnerIndex ? winnerItem : STATE.possibleItems[Math.floor(Math.random() * STATE.possibleItems.length)]);
         UI.rouletteTrack.innerHTML = reel.map(item => `<div class="roulette-item"><img src="${item.imageSrc}" alt="${item.name}"></div>`).join('');
-        const itemWidth = 130; // 120 width + 5*2 margin
+        const itemWidth = 130;
         const targetPosition = (winnerIndex * itemWidth) + (itemWidth / 2);
         const animationDuration = STATE.isFastSpinEnabled ? '0.2s' : '6s';
         UI.rouletteTrack.style.transition = 'none';
@@ -426,7 +415,7 @@ document.addEventListener('DOMContentLoaded', function() {
             track.innerHTML = reel.map(item => `<div class="vertical-roulette-item"><img src="${item.imageSrc}" alt="${item.name}"></div>`).join('');
             spinnerColumn.appendChild(track);
             UI.multiSpinnerContainer.appendChild(spinnerColumn);
-            const itemHeight = 110; // 100 height + 5*2 margin
+            const itemHeight = 110;
             const targetPosition = (winnerIndex * itemHeight) + (itemHeight / 2);
             track.style.transition = 'none';
             track.style.top = '0px';
@@ -466,7 +455,7 @@ document.addEventListener('DOMContentLoaded', function() {
             UI.spinView.classList.add('hidden');
             UI.caseView.classList.remove('hidden');
             STATE.isSpinning = false;
-            await loadInventory(); // <-- Обновляем инвентарь после всех действий
+            await loadInventory();
         };
 
         modalContent.querySelector('.close-btn').addEventListener('click', finalizeAction);
@@ -475,11 +464,8 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(handleCaseClick, 100);
         });
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async () => {
-            // Продажа выигранных предметов - это чисто клиентская логика до синхронизации
             STATE.userBalance += totalValue;
             updateBalanceDisplay();
-            // Тут мы НЕ удаляем из STATE.inventory, т.к. призы еще не были туда добавлены с сервера.
-            // Вместо этого мы просто закроем окно, а loadInventory() при finalizeAction() все синхронизирует.
             showNotification('Предметы проданы!');
             await finalizeAction();
         });
@@ -538,12 +524,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const totalCost = STATE.contest.ticket_price * STATE.ticketQuantity;
         if (STATE.userBalance < totalCost) return showNotification('Недостаточно средств.');
         
-        // Сначала пытаемся списать баланс на сервере
         const success = await updateBalanceOnServer(-totalCost, `Покупка ${STATE.ticketQuantity} билета(ов)`);
         
         if (success) {
             try {
-                // Если списание на сервере прошло, отправляем запрос на покупку билета
                 const response = await fetch('/api/contest/buy-ticket', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -557,11 +541,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!result.success) throw new Error(result.error);
                 
                 showNotification(`Вы успешно приобрели ${STATE.ticketQuantity} билет(ов)!`);
-                await loadContestData(); // Перезагружаем данные конкурса
+                await loadContestData();
             } catch (error) {
                 console.error("Ошибка при покупке билета (после списания):", error);
                 showNotification(error.message);
-                // ВАЖНО: нужно вернуть деньги, если списание прошло, а покупка - нет
                 await updateBalanceOnServer(totalCost, `Возврат за неудачную покупку билета`);
             }
         }
@@ -701,7 +684,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     STATE.gameHistory.push({ ...yourItem, date: new Date(), name: `Неудачный апгрейд ${yourItem.name}`, value: -yourItem.value });
                 }
                 resetUpgradeState(true);
-                await loadInventory(); // Перезагружаем инвентарь с сервера
+                await loadInventory();
                 renderHistory();
             }, 1500);
         }, { once: true });
@@ -727,7 +710,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
 
         const success = await updateBalanceOnServer(-bet, "Ставка в Miner");
-        if (!success) return; // Если списание не удалось, не начинаем игру
+        if (!success) return;
 
         STATE.minerState.isActive = true;
         STATE.minerState.bet = bet;
@@ -1069,10 +1052,10 @@ document.addEventListener('DOMContentLoaded', function() {
             let resultMessage = '';
             if (playerChoice === computerChoice) {
                 resultMessage = "Ничья!";
-                await updateBalanceOnServer(bet, "Возврат ставки в RPS (ничья)"); // Возвращаем ставку
+                await updateBalanceOnServer(bet, "Возврат ставки в RPS (ничья)");
             } else if ((playerChoice === 'rock' && computerChoice === 'scissors') || (playerChoice === 'paper' && computerChoice === 'rock') || (playerChoice === 'scissors' && computerChoice === 'paper')) {
                 resultMessage = `Вы выиграли ${bet} ⭐!`;
-                await updateBalanceOnServer(bet * 2, "Выигрыш в RPS"); // Выигрыш + ставка
+                await updateBalanceOnServer(bet * 2, "Выигрыш в RPS");
                 showNotification(`Победа!`);
             } else {
                 resultMessage = `Вы проиграли ${bet} ⭐.`;
