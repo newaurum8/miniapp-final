@@ -46,6 +46,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // --- НОВАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ БАЛАНСА ---
+    /*
     async function syncBalanceWithBot(balanceChange) {
         if (!STATE.user || !STATE.user.telegram_id || balanceChange === 0) return;
         try {
@@ -67,6 +68,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification('Ошибка синхронизации баланса.');
         }
     }
+    */
 
 
     async function authenticateUser(tgUser) {
@@ -640,7 +642,7 @@ document.addEventListener('DOMContentLoaded', function() {
         STATE.upgradeState.isUpgrading = true;
         UI.performUpgradeBtn.disabled = true;
 
-        syncBalanceWithBot(-yourItem.value); // Списываем предмет для апгрейда
+        // syncBalanceWithBot(-yourItem.value); // Списываем предмет для апгрейда
 
         const isSuccess = (Math.random() * 100) < chance;
         const chanceAngle = (chance / 100) * 360;
@@ -656,7 +658,7 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(async () => {
                 if (isSuccess) {
                     showNotification(`Апгрейд успешный! Вы получили ${desiredItem.name}.`);
-                    syncBalanceWithBot(desiredItem.value); // Начисляем новый предмет
+                    // syncBalanceWithBot(desiredItem.value); // Начисляем новый предмет
                     STATE.gameHistory.push({ ...desiredItem, date: new Date(), name: `Апгрейд до ${desiredItem.name}`, value: desiredItem.value });
                 } else {
                     showNotification(`К сожалению, апгрейд не удался. Предмет потерян.`);
@@ -689,7 +691,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
         STATE.userBalance -= bet;
         updateBalanceDisplay();
-        syncBalanceWithBot(-bet); // Синхронизация
+        // syncBalanceWithBot(-bet); // Синхронизация
         STATE.minerState.isActive = true;
         STATE.minerState.bet = bet;
         STATE.minerState.openedCrystals = 0;
@@ -775,7 +777,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification(`Выигрыш ${STATE.minerState.totalWin.toFixed(2)} ⭐ зачислен!`);
             STATE.userBalance += STATE.minerState.totalWin;
             updateBalanceDisplay();
-            syncBalanceWithBot(STATE.minerState.totalWin); // Синхронизация
+            // syncBalanceWithBot(STATE.minerState.totalWin); // Синхронизация
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
         }
@@ -799,7 +801,7 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.slotsSpinBtn.disabled = true;
         STATE.userBalance -= bet;
         updateBalanceDisplay();
-        syncBalanceWithBot(-bet); // Синхронизация
+        // syncBalanceWithBot(-bet); // Синхронизация
         UI.slotsPayline.classList.remove('visible');
 
         const results = [];
@@ -842,7 +844,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (win > 0) {
             STATE.userBalance += win;
             updateBalanceDisplay();
-            syncBalanceWithBot(win); // Синхронизация
+            // syncBalanceWithBot(win); // Синхронизация
             UI.slotsPayline.classList.add('visible');
             showNotification(`${message} (+${win.toFixed(0)} ⭐)`);
         } else {
@@ -872,7 +874,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
         STATE.userBalance -= bet;
         updateBalanceDisplay();
-        syncBalanceWithBot(-bet); // Синхронизация
+        // syncBalanceWithBot(-bet); // Синхронизация
         STATE.towerState.isActive = true;
         STATE.towerState.bet = bet;
         STATE.towerState.currentLevel = 0;
@@ -954,7 +956,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const winAmount = STATE.towerState.payouts[STATE.towerState.currentLevel - 1];
             STATE.userBalance += winAmount;
             updateBalanceDisplay();
-            syncBalanceWithBot(winAmount); // Синхронизация
+            // syncBalanceWithBot(winAmount); // Синхронизация
             showNotification(`Выигрыш ${winAmount.toLocaleString('ru-RU')} ⭐ зачислен!`);
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
@@ -990,7 +992,7 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.coinflipResult.textContent = '';
         STATE.userBalance -= bet;
         updateBalanceDisplay();
-        syncBalanceWithBot(-bet); // Списываем ставку
+        // syncBalanceWithBot(-bet); // Списываем ставку
         const result = Math.random() < 0.5 ? 'heads' : 'tails';
         UI.coin.addEventListener('transitionend', () => {
             if (playerChoice === result) {
@@ -998,7 +1000,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 STATE.userBalance += winAmount;
                 UI.coinflipResult.textContent = `Вы выиграли ${bet} ⭐!`;
                 showNotification(`Победа!`);
-                syncBalanceWithBot(winAmount); // Начисляем выигрыш
+                // syncBalanceWithBot(winAmount); // Начисляем выигрыш
             } else {
                 UI.coinflipResult.textContent = `Вы проиграли ${bet} ⭐.`;
                 showNotification(`Проигрыш!`);
@@ -1045,7 +1047,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             STATE.userBalance += balanceChange + (playerChoice === computerChoice ? bet : 0); // Обновляем баланс
             updateBalanceDisplay();
-            syncBalanceWithBot(balanceChange); // Синхронизируем изменение
+            // syncBalanceWithBot(balanceChange); // Синхронизируем изменение
             UI.rpsResultMessage.textContent = resultMessage;
 
             setTimeout(() => {
