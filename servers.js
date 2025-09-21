@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Используем переменную окружения для строки подключения
+// Ваша строка подключения к базе данных NeonDB
 const connectionString = 'postgresql://neondb_owner:npg_xoO8NXpDn1fy@ep-hidden-sound-a23oyr8a-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
 if (!connectionString) {
@@ -72,27 +72,36 @@ app.post('/api/user/get-or-create', async (req, res) => {
         return res.status(400).json({ error: "telegram_id является обязательным" });
     }
     try {
+        // Используем user_id как основной ключ и balance_uah для баланса
         let userResult = await pool.query("SELECT user_id, username, balance_uah FROM users WHERE user_id = $1", [telegram_id]);
         if (userResult.rows.length > 0) {
-            // Преобразуем для совместимости с фронтендом
-            const user = { ...userResult.rows[0], id: userResult.rows[0].user_id, balance: userResult.rows[0].balance_uah };
+            // Преобразуем для совместимости с фронтендом, который ожидает 'id' и 'balance'
+            const user = { ...userResult.rows[0], id: userResult.rows[0].user_id, balance: parseFloat(userResult.rows[0].balance_uah) };
             res.json(user);
         } else {
             const initialBalance = 1000.00;
             const newUserResult = await pool.query(
-                "INSERT INTO users (user_id, username, balance_uah) VALUES ($1, $2, $3) RETURNING user_id, username, balance_uah",
+                "INSERT INTO users (user_id, username, balance_uah) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING RETURNING user_id, username, balance_uah",
                 [telegram_id, username, initialBalance]
             );
-             const user = { ...newUserResult.rows[0], id: newUserResult.rows[0].user_id, balance: newUserResult.rows[0].balance_uah };
-            res.status(201).json(user);
+             if (newUserResult.rows.length > 0) {
+                const user = { ...newUserResult.rows[0], id: newUserResult.rows[0].user_id, balance: parseFloat(newUserResult.rows[0].balance_uah) };
+                res.status(201).json(user);
+             } else {
+                // Если пользователь уже существует, но INSERT..ON CONFLICT ничего не вернул, делаем повторный SELECT.
+                let existingUserResult = await pool.query("SELECT user_id, username, balance_uah FROM users WHERE user_id = $1", [telegram_id]);
+                const user = { ...existingUserResult.rows[0], id: existingUserResult.rows[0].user_id, balance: parseFloat(existingUserResult.rows[0].balance_uah) };
+                res.json(user);
+             }
         }
     } catch (err) {
+        console.error('Ошибка в /api/user/get-or-create:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
 
 app.post('/api/v1/balance/change', async (req, res) => {
-    const { user_id, delta, reason } = req.body; // user_id это telegram_id
+    const { user_id, delta } = req.body; // user_id это telegram_id
 
     if (typeof user_id !== 'number' || typeof delta !== 'number') {
         return res.status(400).json({ detail: "Неверные параметры запроса." });
@@ -101,15 +110,11 @@ app.post('/api/v1/balance/change', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
-        const userResult = await client.query(
-            "SELECT balance_uah FROM users WHERE user_id = $1 FOR UPDATE",
-            [user_id]
-        );
-
+        const userResult = await client.query("SELECT balance_uah FROM users WHERE user_id = $1 FOR UPDATE", [user_id]);
         let currentBalance;
+
         if (userResult.rows.length === 0) {
-            await client.query("INSERT INTO users (user_id, username, balance_uah) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING", [user_id, "mini_app_user", 1000.00]);
+            await client.query("INSERT INTO users (user_id, balance_uah) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING", [user_id, 1000.00]);
             const newUserBalanceResult = await client.query("SELECT balance_uah FROM users WHERE user_id = $1 FOR UPDATE", [user_id]);
             currentBalance = parseFloat(newUserBalanceResult.rows[0].balance_uah);
         } else {
@@ -123,14 +128,9 @@ app.post('/api/v1/balance/change', async (req, res) => {
             return res.status(400).json({ detail: "Недостаточно средств на балансе." });
         }
 
-        await client.query(
-            "UPDATE users SET balance_uah = $1 WHERE user_id = $2",
-            [newBalance, user_id]
-        );
-
+        await client.query("UPDATE users SET balance_uah = $1 WHERE user_id = $2", [newBalance, user_id]);
         await client.query('COMMIT');
         res.json({ status: "ok", message: "Balance updated successfully", new_balance: newBalance });
-
     } catch (e) {
         await client.query('ROLLBACK');
         console.error(`Ошибка при изменении баланса для user ${user_id}: ${e}`);
@@ -141,7 +141,7 @@ app.post('/api/v1/balance/change', async (req, res) => {
 });
 
 app.get('/api/user/inventory', async (req, res) => {
-    const { user_id } = req.query; // Здесь user_id это telegram_id
+    const { user_id } = req.query;
     if (!user_id) {
         return res.status(400).json({ error: 'user_id является обязательным' });
     }
@@ -161,7 +161,7 @@ app.get('/api/user/inventory', async (req, res) => {
 });
 
 app.post('/api/user/inventory/sell', async (req, res) => {
-    const { user_id, unique_id } = req.body; // Здесь user_id это telegram_id
+    const { user_id, unique_id } = req.body;
     if (!user_id || !unique_id) {
         return res.status(400).json({ error: 'Неверные данные для продажи' });
     }
@@ -183,7 +183,7 @@ app.post('/api/user/inventory/sell', async (req, res) => {
         await client.query('COMMIT');
 
         const userResult = await pool.query("SELECT balance_uah FROM users WHERE user_id = $1", [user_id]);
-        res.json({ success: true, newBalance: userResult.rows[0].balance_uah });
+        res.json({ success: true, newBalance: parseFloat(userResult.rows[0].balance_uah) });
 
     } catch (err) {
         await client.query('ROLLBACK');
@@ -209,7 +209,7 @@ app.get('/api/case/items_full', async (req, res) => {
 });
 
 app.post('/api/case/open', async (req, res) => {
-    const { user_id, quantity } = req.body; // user_id - это telegram_id
+    const { user_id, quantity } = req.body;
     const casePrice = 100;
     const totalCost = casePrice * (quantity || 1);
 
@@ -303,16 +303,6 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-
-        const contestResult = await client.query("SELECT * FROM contests WHERE id = $1 AND is_active = TRUE", [contest_id]);
-        if (contestResult.rows.length === 0 || contestResult.rows[0].end_time <= Date.now()) {
-            throw new Error('Конкурс неактивен или завершен');
-        }
-        const contest = contestResult.rows[0];
-
-        // Баланс уже списан через /api/v1/balance/change, здесь только добавляем билеты
-        const userResult = await client.query("SELECT user_id FROM users WHERE user_id = $1", [telegram_id]);
-        if (userResult.rows.length === 0) throw new Error('Пользователь не найден');
         
         for (let i = 0; i < quantity; i++) {
             await client.query("INSERT INTO user_tickets (contest_id, user_id, telegram_id) VALUES ($1, $2, $3)", [contest_id, telegram_id, telegram_id]);
@@ -329,13 +319,12 @@ app.post('/api/contest/buy-ticket', async (req, res) => {
     }
 });
 
-
 // --- API Маршруты (админские) ---
 app.use('/api/admin', checkAdminSecret);
 
 app.get('/api/admin/users', async (req, res) => {
     try {
-        const { rows } = await pool.query("SELECT user_id, user_id as telegram_id, username, balance_uah as balance FROM users ORDER BY user_id DESC");
+        const { rows } = await pool.query("SELECT user_id as id, user_id as telegram_id, username, balance_uah as balance FROM users ORDER BY user_id DESC");
         res.json(rows);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -471,7 +460,6 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
         client.release();
     }
 });
-
 
 app.listen(port, () => {
     console.log(`Сервер успешно запущен на порту ${port}`);
