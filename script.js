@@ -36,7 +36,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- ОБЪЕКТ С ЭЛЕМЕНТАМИ DOM ---
     const UI = {};
 
-    // !!! ВАЖНО: Этот ключ должен быть таким же, как MINI_APP_SECRET_KEY в webhook_handler.py !!!
+    // !!! ВАЖНО: Укажите здесь полный URL вашего сервера на Render !!!
+    const API_BASE_URL = 'https://mmmmmm-mf64.onrender.com';
     const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
 
     // --- ФУНКЦИИ ---
@@ -50,7 +51,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function authenticateUser(tgUser) {
         try {
-            const response = await fetch('/api/user/get-or-create', {
+            const response = await fetch(`${API_BASE_URL}/api/user/get-or-create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -71,7 +72,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ========== ПОЛНОСТЬЮ ПЕРЕРАБОТАННАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ ==========
     async function updateBalanceOnServer(delta, reason) {
         if (!STATE.user || typeof STATE.user.telegram_id !== 'number') {
             console.error("updateBalanceOnServer FAILED: User object or user.telegram_id is not a valid number.", STATE.user);
@@ -86,19 +86,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 reason: reason || "mini_app_action" 
             };
             const requestBodyString = JSON.stringify(requestBody);
-
-            // 1. Создаем подпись HMAC
             const signature = CryptoJS.HmacSHA256(requestBodyString, MINI_APP_SECRET_KEY).toString(CryptoJS.enc.Hex);
-            
-            // 2. Создаем ключ идемпотентности, чтобы избежать двойных списаний
             const idempotencyKey = `${STATE.user.telegram_id}-${Date.now()}`;
 
-            const response = await fetch('/api/v1/balance/change', {
+            const response = await fetch(`${API_BASE_URL}/api/v1/balance/change`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Signature': signature, // <-- Отправляем подпись
-                    'X-Idempotency-Key': idempotencyKey // <-- Отправляем ключ
+                    'X-Signature': signature,
+                    'X-Idempotency-Key': idempotencyKey
                 },
                 body: requestBodyString
             });
@@ -123,13 +119,11 @@ document.addEventListener('DOMContentLoaded', function() {
             return false;
         }
     }
-    // =======================================================================
-
 
     async function loadInventory() {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const response = await fetch(`/api/user/inventory?user_id=${STATE.user.id}`);
+            const response = await fetch(`${API_BASE_URL}/api/user/inventory?user_id=${STATE.user.id}`);
             if (!response.ok) throw new Error('Could not fetch inventory');
             const inventoryData = await response.json();
             STATE.inventory = inventoryData;
@@ -138,7 +132,6 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error("Ошибка загрузки инвентаря:", error);
         }
     }
-
 
     function loadTelegramData() {
         try {
@@ -286,7 +279,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function sellFromInventory(uniqueId) {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const response = await fetch('/api/user/inventory/sell', {
+            const response = await fetch(`${API_BASE_URL}/api/user/inventory/sell`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ user_id: STATE.user.id, unique_id: uniqueId })
@@ -363,7 +356,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < totalCost) return showNotification("Недостаточно средств.");
 
         try {
-            const response = await fetch('/api/case/open', {
+            const response = await fetch(`${API_BASE_URL}/api/case/open`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ user_id: STATE.user.id, quantity: STATE.openQuantity })
@@ -514,7 +507,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadContestData() {
         if (!STATE.user || !STATE.user.telegram_id) return;
         try {
-            const response = await fetch(`/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
+            const response = await fetch(`${API_BASE_URL}/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
             if (!response.ok) throw new Error('Network error');
             STATE.contest = await response.json();
             updateContestUI();
@@ -556,7 +549,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         if (success) {
             try {
-                const response = await fetch('/api/contest/buy-ticket', {
+                const response = await fetch(`${API_BASE_URL}/api/contest/buy-ticket`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1104,7 +1097,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadInitialData() {
         try {
-            const [caseResponse, settingsResponse] = await Promise.all([ fetch('/api/case/items_full'), fetch('/api/game_settings') ]);
+            const [caseResponse, settingsResponse] = await Promise.all([ fetch(`${API_BASE_URL}/api/case/items_full`), fetch(`${API_BASE_URL}/api/game_settings`) ]);
             if (!caseResponse.ok) throw new Error(`Ошибка загрузки кейсов: ${caseResponse.status}`);
             if (!settingsResponse.ok) throw new Error(`Ошибка загрузки настроек: ${settingsResponse.status}`);
             STATE.possibleItems = await caseResponse.json();
@@ -1178,7 +1171,12 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         for (const key in selectors) {
-            UI[key] = document.querySelector(selectors[key]);
+            const element = document.querySelector(selectors[key]);
+            if (element) {
+                UI[key] = element;
+            } else {
+                console.warn(`Element with selector "${selectors[key]}" not found for UI key "${key}".`);
+            }
         }
         UI.views = document.querySelectorAll('.view');
         UI.navButtons = document.querySelectorAll('.nav-btn');
