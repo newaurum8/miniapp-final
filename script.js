@@ -36,8 +36,14 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- ОБЪЕКТ С ЭЛЕМЕНТАМИ DOM ---
     const UI = {};
 
-    // !!! ВАЖНО: Укажите здесь полный URL вашего сервера на Render !!!
-    const API_BASE_URL = 'https://mmmmmm-mf64.onrender.com';
+    // ### НАЧАЛО ВАЖНЫХ ИЗМЕНЕНИЙ ###
+    // URL для Node.js бэкенда (игры, инвентарь и т.д.)
+    const MINI_APP_API_URL = 'https://mmmmmm-mf64.onrender.com'; 
+    
+    // URL для Python бэкенда (безопасные операции с балансом)
+    const BOT_API_URL = 'http://server4644.server-vps.com:8000';
+    // ### КОНЕЦ ВАЖНЫХ ИЗМЕНЕНИЙ ###
+
     const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
 
     // --- ФУНКЦИИ ---
@@ -51,7 +57,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function authenticateUser(tgUser) {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/user/get-or-create`, {
+            const response = await fetch(`${MINI_APP_API_URL}/api/user/get-or-create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -74,7 +80,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function updateBalanceOnServer(delta, reason) {
         if (!STATE.user || typeof STATE.user.telegram_id !== 'number') {
-            console.error("updateBalanceOnServer FAILED: User object or user.telegram_id is not a valid number.", STATE.user);
             showNotification('Ошибка: Пользователь не авторизован.');
             return false;
         }
@@ -88,8 +93,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const requestBodyString = JSON.stringify(requestBody);
             const signature = CryptoJS.HmacSHA256(requestBodyString, MINI_APP_SECRET_KEY).toString(CryptoJS.enc.Hex);
             const idempotencyKey = `${STATE.user.telegram_id}-${Date.now()}`;
-
-            const response = await fetch(`${API_BASE_URL}/api/v1/balance/change`, {
+            
+            const response = await fetch(`${BOT_API_URL}/api/v1/balance/change`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -102,7 +107,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const result = await response.json();
 
             if (!response.ok) {
-                console.error("Server responded with an error:", result);
                 throw new Error(result.detail || 'Не удалось обновить баланс.');
             }
 
@@ -123,7 +127,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadInventory() {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const response = await fetch(`${API_BASE_URL}/api/user/inventory?user_id=${STATE.user.id}`);
+            const response = await fetch(`${MINI_APP_API_URL}/api/user/inventory?user_id=${STATE.user.id}`);
             if (!response.ok) throw new Error('Could not fetch inventory');
             const inventoryData = await response.json();
             STATE.inventory = inventoryData;
@@ -279,7 +283,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function sellFromInventory(uniqueId) {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const response = await fetch(`${API_BASE_URL}/api/user/inventory/sell`, {
+            const response = await fetch(`${MINI_APP_API_URL}/api/user/inventory/sell`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ user_id: STATE.user.id, unique_id: uniqueId })
@@ -356,7 +360,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < totalCost) return showNotification("Недостаточно средств.");
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/case/open`, {
+            const response = await fetch(`${MINI_APP_API_URL}/api/case/open`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ user_id: STATE.user.id, quantity: STATE.openQuantity })
@@ -507,7 +511,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadContestData() {
         if (!STATE.user || !STATE.user.telegram_id) return;
         try {
-            const response = await fetch(`${API_BASE_URL}/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
+            const response = await fetch(`${MINI_APP_API_URL}/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
             if (!response.ok) throw new Error('Network error');
             STATE.contest = await response.json();
             updateContestUI();
@@ -549,7 +553,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         if (success) {
             try {
-                const response = await fetch(`${API_BASE_URL}/api/contest/buy-ticket`, {
+                const response = await fetch(`${MINI_APP_API_URL}/api/contest/buy-ticket`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1097,7 +1101,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadInitialData() {
         try {
-            const [caseResponse, settingsResponse] = await Promise.all([ fetch(`${API_BASE_URL}/api/case/items_full`), fetch(`${API_BASE_URL}/api/game_settings`) ]);
+            const [caseResponse, settingsResponse] = await Promise.all([ fetch(`${MINI_APP_API_URL}/api/case/items_full`), fetch(`${MINI_APP_API_URL}/api/game_settings`) ]);
             if (!caseResponse.ok) throw new Error(`Ошибка загрузки кейсов: ${caseResponse.status}`);
             if (!settingsResponse.ok) throw new Error(`Ошибка загрузки настроек: ${settingsResponse.status}`);
             STATE.possibleItems = await caseResponse.json();
