@@ -68,24 +68,33 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
+    // ========== ИЗМЕНЁННАЯ ФУНКЦИЯ ==========
     async function updateBalanceOnServer(delta, reason) {
         if (!STATE.user || !STATE.user.telegram_id) {
             console.error("Пользователь не авторизован для обновления баланса на сервере.");
-            // Возвращаем false, чтобы вызывающая функция знала, что операция не удалась
             return false;
         }
 
+        const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
+        const body = JSON.stringify({
+            user_id: STATE.user.telegram_id,
+            delta: delta,
+            reason: reason
+        });
+
+        const signature = CryptoJS.HmacSHA256(body, MINI_APP_SECRET_KEY).toString(CryptoJS.enc.Hex);
+        const idempotencyKey = crypto.randomUUID();
+
         try {
-            const response = await fetch('/api/v1/balance/change', {
+            // Указываем IP-адрес и порт вашего VDS
+            const response = await fetch('http://91.239.235.200:8000/api/v1/balance/change', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-Signature': signature,
+                    'X-Idempotency-Key': idempotencyKey
                 },
-                body: JSON.stringify({
-                    user_id: STATE.user.telegram_id,
-                    delta: delta,
-                    reason: reason
-                })
+                body: body
             });
 
             const result = await response.json();
@@ -94,19 +103,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 throw new Error(result.detail || 'Не удалось обновить баланс на сервере.');
             }
 
-            // Обновляем баланс только после успешного ответа от сервера
             STATE.userBalance = result.new_balance;
             updateBalanceDisplay();
-            return true; // Возвращаем true в случае успеха
+            return true; 
 
         } catch (error) {
             console.error('Ошибка синхронизации баланса:', error);
             showNotification(error.message || 'Ошибка синхронизации баланса с ботом.');
-            // В случае ошибки, перезагружаем актуальный баланс с сервера, чтобы избежать рассинхрона
             await authenticateUser(window.Telegram.WebApp.initDataUnsafe.user);
-            return false; // Возвращаем false в случае ошибки
+            return false;
         }
     }
+    // =======================================
 
 
     // --- НОВАЯ ФУНКЦИЯ ЗАГРУЗКИ ИНВЕНТАРЯ ---
