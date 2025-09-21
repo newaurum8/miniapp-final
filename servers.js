@@ -73,9 +73,10 @@ app.post('/api/user/get-or-create', async (req, res) => {
     try {
         let userResult = await pool.query("SELECT user_id, username, balance_uah FROM users WHERE user_id = $1", [telegram_id]);
         
+        // ИСПРАВЛЕНИЕ: Явно преобразуем ID в число, чтобы избежать проблем с типами данных.
         const formatUser = (dbUser) => ({
-            id: dbUser.user_id,
-            telegram_id: dbUser.user_id, // <-- ИЗМЕНЕНИЕ: Добавлено это поле для консистентности
+            id: Number(dbUser.user_id),
+            telegram_id: Number(dbUser.user_id), // Убедимся, что это число
             username: dbUser.username,
             balance: parseFloat(dbUser.balance_uah)
         });
@@ -104,8 +105,10 @@ app.post('/api/user/get-or-create', async (req, res) => {
 app.post('/api/v1/balance/change', async (req, res) => {
     const { user_id, delta } = req.body; 
 
-    if (typeof user_id !== 'number' || typeof delta !== 'number') {
-        return res.status(400).json({ detail: "Неверные параметры запроса." });
+    // ИСПРАВЛЕНИЕ: Улучшенная проверка и логирование для отладки
+    if (typeof user_id !== 'number' || typeof delta !== 'number' || isNaN(user_id) || isNaN(delta)) {
+        console.error(`Неверные параметры запроса: user_id=${user_id} (тип ${typeof user_id}), delta=${delta} (тип ${typeof delta})`);
+        return res.status(400).json({ detail: `Неверные параметры запроса. Получено: user_id (${typeof user_id}), delta (${typeof delta})` });
     }
 
     const client = await pool.connect();
@@ -114,7 +117,9 @@ app.post('/api/v1/balance/change', async (req, res) => {
         const userResult = await client.query("SELECT balance_uah FROM users WHERE user_id = $1 FOR UPDATE", [user_id]);
         
         if (userResult.rows.length === 0) {
-             throw new Error("Пользователь не найден для обновления баланса.");
+             await client.query('ROLLBACK');
+             console.error(`Пользователь ${user_id} не найден для обновления баланса.`);
+             return res.status(404).json({ detail: "Пользователь не найден." });
         }
         
         const currentBalance = parseFloat(userResult.rows[0].balance_uah);
@@ -131,7 +136,7 @@ app.post('/api/v1/balance/change', async (req, res) => {
     } catch (e) {
         await client.query('ROLLBACK');
         console.error(`Ошибка при изменении баланса для user ${user_id}: ${e}`);
-        res.status(500).json({ detail: "Internal server error" });
+        res.status(500).json({ detail: "Внутренняя ошибка сервера" });
     } finally {
         client.release();
     }
