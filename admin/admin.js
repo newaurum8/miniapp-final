@@ -1,5 +1,5 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // ИСПРАВЛЕНО: URL-адрес бэкенда теперь относительный
+    // Используем относительный URL
     const API_BASE_URL = '';
 
     const params = new URLSearchParams(window.location.search);
