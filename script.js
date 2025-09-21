@@ -1,7 +1,6 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // --- ВАЖНО: Укажите здесь полный URL вашего бэкенд-сервера! ---
-    // Я вставил ваш URL с Render. Если ваш бэкенд на другом адресе, измените его.
-    const API_BASE_URL = 'https://mmmmmm-mf64.onrender.com';
+    // ИСПРАВЛЕНО: URL-адрес бэкенда теперь относительный
+    const API_BASE_URL = '';
 
     // --- ГЛОБАЛЬНЫЙ СТАТУС ---
     const STATE = {
