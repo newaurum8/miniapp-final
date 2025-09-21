@@ -183,18 +183,22 @@ app.post('/api/user/get-or-create', async (req, res) => {
 
 // НОВЫЙ ЭНДПОИНТ ДЛЯ СИНХРОНИЗАЦИИ
 app.post('/api/user/update-balance', async (req, res) => {
-    const { telegram_id, newBalance } = req.body;
-    if (!telegram_id || newBalance === undefined) {
-        return res.status(400).json({ error: "telegram_id и newBalance обязательны" });
+    const { telegram_id, balance_change } = req.body;
+    if (!telegram_id || balance_change === undefined) {
+        return res.status(400).json({ error: "telegram_id и balance_change обязательны" });
     }
     try {
-        await pool.query("UPDATE users SET balance_uah = $1 WHERE telegram_id = $2", [newBalance, telegram_id]);
-        res.json({ success: true, message: `Balance for ${telegram_id} updated.` });
+        const result = await pool.query("UPDATE users SET balance_uah = balance_uah + $1 WHERE telegram_id = $2 RETURNING balance_uah", [balance_change, telegram_id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: "User not found" });
+        }
+        res.json({ success: true, newBalance: result.rows[0].balance_uah });
     } catch (err) {
         console.error("Ошибка при обновлении баланса из бота:", err);
         res.status(500).json({ error: err.message });
     }
 });
+
 
 
 app.get('/api/user/inventory', async (req, res) => {
@@ -412,14 +416,19 @@ app.get('/api/admin/users', async (req, res) => {
 });
 
 app.post('/api/admin/user/balance', async (req, res) => {
-    const { userId, newBalance } = req.body;
+    const { telegramId, newBalance } = req.body;
     try {
-        const result = await pool.query("UPDATE users SET balance_uah = $1 WHERE id = $2", [newBalance, userId]);
-        res.json({ success: true, changes: result.rowCount });
+        const result = await pool.query("UPDATE users SET balance_uah = $1 WHERE telegram_id = $2 RETURNING balance_uah", [newBalance, telegramId]);
+        if (result.rowCount > 0) {
+            res.json({ success: true, newBalance: result.rows[0].balance_uah });
+        } else {
+            res.status(404).json({ error: "User not found" });
+        }
     } catch (err) {
         res.status(500).json({ "error": err.message });
     }
 });
+
 
 app.get('/api/admin/items', async (req, res) => {
     try {
