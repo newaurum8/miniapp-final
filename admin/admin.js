@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // --- ИЗМЕНЕНИЕ: Указываем полный URL вашего сервера на Render ---
-    const API_BASE_URL = 'https://mmmmmm-mf64.onrender.com';
+    // ИСПРАВЛЕНО: URL-адрес бэкенда теперь относительный
+    const API_BASE_URL = '';
 
     const params = new URLSearchParams(window.location.search);
     const ADMIN_SECRET_KEY = params.get('secret');
@@ -126,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
             label.className = 'item-label';
             label.innerHTML = `
                 <input type="checkbox" data-itemid="${item.id}" ${isChecked ? 'checked' : ''}>
-                <img src="${item.imageSrc}" alt="${item.name}">
+                <img src="../${item.imageSrc}" alt="${item.name}">
                 <span>${item.name}</span>
             `;
             caseItemsContainer.appendChild(label);
