@@ -22,8 +22,9 @@ redisClient.on('error', err => console.error('Redis Client Error', err));
 // --- Глобальные переменные и middleware ---
 const ADMIN_SECRET = 'Aurum';
 const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
+const CASE_PRICE = 100; // Цена за открытие одного кейса
 
-app.use(cors()); // Включаем CORS для всех маршрутов
+app.use(cors());
 
 // Middleware для чтения rawBody, необходимого для проверки подписи
 app.use(express.json({
@@ -36,8 +37,9 @@ app.use(express.json({
 const checkSignature = (req, res, next) => {
     try {
         const signature = req.headers['x-signature'];
-        if (!signature) {
-            return res.status(403).json({ detail: "Signature missing" });
+        const idempotencyKey = req.headers['x-idempotency-key'];
+        if (!signature || !idempotencyKey) {
+            return res.status(400).json({ detail: "Signature or Idempotency Key missing" });
         }
         const expectedSignature = crypto
             .createHmac('sha256', MINI_APP_SECRET_KEY)
@@ -68,66 +70,47 @@ const checkAdminSecret = (req, res, next) => {
     }
 };
 
-// --- Маршруты ---
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/admin', checkAdminSecret, (req, res) => res.sendFile(path.join(__dirname, 'admin', 'index.html')));
 
-// ### ЕДИНЫЙ ЭНДПОИНТ ДЛЯ ИЗМЕНЕНИЯ БАЛАНСА ###
-app.post('/api/v1/balance/change', checkSignature, async (req, res) => {
-    const { user_id, delta } = req.body;
-    const idempotencyKey = req.headers['x-idempotency-key'];
-
-    if (!user_id || typeof delta !== 'number' || !idempotencyKey) {
-        return res.status(400).json({ detail: "Отсутствуют необходимые параметры." });
-    }
-
-    const processedKey = `idempotency:${idempotencyKey}`;
-    try {
-        const alreadyProcessed = await redisClient.get(processedKey);
-        if (alreadyProcessed) {
-            const profile = await pgPool.query("SELECT balance_uah FROM users WHERE user_id = $1", [user_id]);
-            const currentBalance = profile.rows.length > 0 ? parseFloat(profile.rows[0].balance_uah) : 0;
-            return res.json({ status: "ok", message: "Запрос уже обработан", new_balance: currentBalance });
+// ### Утилитарная функция для изменения баланса (транзакционная) ###
+async function changeBalance(client, userId, delta, reason) {
+    const userResult = await client.query("SELECT balance_uah FROM users WHERE user_id = $1 FOR UPDATE", [userId]);
+    if (userResult.rows.length === 0) {
+        // Если пользователя нет, создаем его с начальным балансом
+        const initialBalance = 1000.00;
+        await client.query(
+            "INSERT INTO users (user_id, username, balance_uah) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO NOTHING",
+            [userId, `user_${userId}`, initialBalance]
+        );
+        const newUserResult = await client.query("SELECT balance_uah FROM users WHERE user_id = $1 FOR UPDATE", [userId]);
+        if (newUserResult.rows.length === 0){
+             throw new Error("Не удалось создать или найти пользователя после вставки.");
         }
-
-        const client = await pgPool.connect();
-        try {
-            await client.query('BEGIN');
-            const userResult = await client.query("SELECT balance_uah FROM users WHERE user_id = $1 FOR UPDATE", [user_id]);
-            
-            if (userResult.rows.length === 0) {
-                 await client.query('ROLLBACK');
-                 return res.status(404).json({ detail: "Пользователь не найден." });
-            }
-            
-            const currentBalance = parseFloat(userResult.rows[0].balance_uah);
-            const newBalance = currentBalance + delta;
-    
-            if (newBalance < 0) {
-                await client.query('ROLLBACK');
-                return res.status(400).json({ detail: "Недостаточно средств на балансе." });
-            }
-    
-            await client.query("UPDATE users SET balance_uah = $1 WHERE user_id = $2", [newBalance, user_id]);
-            await client.query('COMMIT');
-            
-            await redisClient.set(processedKey, '1', { EX: 86400 });
-
-            res.json({ status: "ok", message: "Баланс успешно обновлен", new_balance: newBalance });
-        } catch (e) {
-            await client.query('ROLLBACK');
-            console.error(`Ошибка транзакции баланса для user ${user_id}: ${e}`);
-            res.status(500).json({ detail: "Внутренняя ошибка сервера (транзакция)" });
-        } finally {
-            client.release();
+        const currentBalance = parseFloat(newUserResult.rows[0].balance_uah);
+        const newBalance = currentBalance + delta;
+        if (newBalance < 0) {
+            throw new Error("Недостаточно средств на балансе.");
         }
-    } catch (e) {
-        console.error(`Критическая ошибка (Redis/etc) для user ${user_id}: ${e}`);
-        res.status(500).json({ detail: "Внутренняя ошибка сервера (общая)" });
-    }
-});
+        await client.query("UPDATE users SET balance_uah = $1 WHERE user_id = $2", [newBalance, userId]);
+        return newBalance;
 
-// --- API Маршруты ---
+    } else {
+        const currentBalance = parseFloat(userResult.rows[0].balance_uah);
+        const newBalance = currentBalance + delta;
+        if (newBalance < 0) {
+            throw new Error("Недостаточно средств на балансе.");
+        }
+        await client.query("UPDATE users SET balance_uah = $1 WHERE user_id = $2", [newBalance, userId]);
+        // Здесь можно добавить логирование транзакций, если нужно
+        return newBalance;
+    }
+}
+
+
+// --- API Маршруты для Mini App ---
+
+// Получение/создание пользователя
 app.post('/api/user/get-or-create', async (req, res) => {
     const { telegram_id, username } = req.body;
     if (!telegram_id) {
@@ -159,6 +142,7 @@ app.post('/api/user/get-or-create', async (req, res) => {
     }
 });
 
+// Получение инвентаря
 app.get('/api/user/inventory', async (req, res) => {
     const { user_id } = req.query;
     if (!user_id) {
@@ -175,22 +159,152 @@ app.get('/api/user/inventory', async (req, res) => {
     }
 });
 
-app.post('/api/user/inventory/delete', async (req, res) => {
-    const { user_id, unique_id } = req.body;
-    if (!user_id || !unique_id) {
-        return res.status(400).json({ error: 'Неверные данные' });
+// Открытие кейса
+app.post('/api/case/open', checkSignature, async (req, res) => {
+    const { user_id, quantity } = req.body;
+    const idempotencyKey = req.headers['x-idempotency-key'];
+    const processedKey = `idempotency:${idempotencyKey}`;
+
+    if (!user_id || !quantity || quantity <= 0) {
+        return res.status(400).json({ detail: 'Неверные данные' });
     }
+
+    if (await redisClient.get(processedKey)) {
+         return res.status(200).json({ detail: "Запрос уже обработан" });
+    }
+
+    const client = await pgPool.connect();
     try {
-        const result = await pgPool.query("DELETE FROM user_inventory WHERE id = $1 AND user_id = $2", [unique_id, user_id]);
-        if (result.rowCount === 0) {
-            throw new Error('Предмет не найден или не принадлежит пользователю');
+        await client.query('BEGIN');
+
+        const totalCost = CASE_PRICE * quantity;
+        const newBalance = await changeBalance(client, user_id, -totalCost, `Открытие ${quantity} кейса(ов)`);
+
+        const caseItemsResult = await client.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
+        if (caseItemsResult.rows.length === 0) throw new Error('Кейс пуст');
+        const caseItems = caseItemsResult.rows;
+        
+        const wonItems = [];
+        for (let i = 0; i < quantity; i++) {
+            const randomItem = caseItems[Math.floor(Math.random() * caseItems.length)];
+            const inserted = await client.query(
+                'INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2) RETURNING id',
+                [user_id, randomItem.id]
+            );
+            wonItems.push({ ...randomItem, uniqueId: inserted.rows[0].id });
         }
-        res.json({ success: true });
+
+        await client.query('COMMIT');
+        await redisClient.set(processedKey, '1', { EX: 86400 });
+
+        res.json({ success: true, newBalance, wonItems });
+
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        await client.query('ROLLBACK');
+        console.error(`Ошибка открытия кейса для user ${user_id}:`, err);
+        res.status(500).json({ detail: err.message });
+    } finally {
+        client.release();
     }
 });
 
+// Продажа предметов
+app.post('/api/inventory/sell', checkSignature, async (req, res) => {
+    const { user_id, uniqueIds } = req.body;
+    const idempotencyKey = req.headers['x-idempotency-key'];
+    const processedKey = `idempotency:${idempotencyKey}`;
+
+    if (!user_id || !uniqueIds || !Array.isArray(uniqueIds) || uniqueIds.length === 0) {
+        return res.status(400).json({ detail: 'Неверные данные' });
+    }
+     if (await redisClient.get(processedKey)) {
+        const profile = await pgPool.query("SELECT balance_uah FROM users WHERE user_id = $1", [user_id]);
+        const currentBalance = profile.rows.length > 0 ? parseFloat(profile.rows[0].balance_uah) : 0;
+        return res.json({ success: true, message: "Запрос уже обработан", newBalance: currentBalance });
+    }
+
+    const client = await pgPool.connect();
+    try {
+        await client.query('BEGIN');
+
+        const itemsToSell = await client.query(
+            `SELECT ui.id, i.value FROM user_inventory ui 
+             JOIN items i ON ui.item_id = i.id 
+             WHERE ui.user_id = $1 AND ui.id = ANY($2::int[])`,
+            [user_id, uniqueIds]
+        );
+
+        if (itemsToSell.rows.length !== uniqueIds.length) {
+            throw new Error('Один или несколько предметов не найдены или не принадлежат вам.');
+        }
+
+        const totalValue = itemsToSell.rows.reduce((sum, item) => sum + item.value, 0);
+
+        await client.query(
+            "DELETE FROM user_inventory WHERE id = ANY($1::int[]) AND user_id = $2",
+            [uniqueIds, user_id]
+        );
+
+        const newBalance = await changeBalance(client, user_id, totalValue, `Продажа ${uniqueIds.length} предмета(ов)`);
+
+        await client.query('COMMIT');
+        await redisClient.set(processedKey, '1', { EX: 86400 });
+        
+        res.json({ success: true, newBalance });
+
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(`Ошибка продажи для user ${user_id}:`, err);
+        res.status(500).json({ detail: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+// Покупка билетов на конкурс
+app.post('/api/contest/buy-ticket', checkSignature, async (req, res) => {
+    const { contest_id, telegram_id, quantity } = req.body;
+    const idempotencyKey = req.headers['x-idempotency-key'];
+    const processedKey = `idempotency:${idempotencyKey}`;
+
+    if (!contest_id || !telegram_id || !quantity || quantity < 1) {
+        return res.status(400).json({ detail: 'Неверные данные' });
+    }
+    
+    if (await redisClient.get(processedKey)) {
+        return res.status(200).json({ detail: "Запрос уже обработан" });
+    }
+
+    const client = await pgPool.connect();
+    try {
+        await client.query('BEGIN');
+        
+        const contestResult = await client.query("SELECT ticket_price FROM contests WHERE id = $1 AND is_active = TRUE", [contest_id]);
+        if(contestResult.rows.length === 0) throw new Error("Конкурс не найден или неактивен");
+
+        const ticketPrice = contestResult.rows[0].ticket_price;
+        const totalCost = ticketPrice * quantity;
+
+        const newBalance = await changeBalance(client, telegram_id, -totalCost, `Покупка ${quantity} билета(ов)`);
+
+        for (let i = 0; i < quantity; i++) {
+            await client.query("INSERT INTO user_tickets (contest_id, user_id, telegram_id) VALUES ($1, $2, $3)", [contest_id, telegram_id, telegram_id]);
+        }
+        await client.query('COMMIT');
+        await redisClient.set(processedKey, '1', { EX: 86400 });
+
+        res.json({ success: true, newBalance });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(`Ошибка покупки билета для user ${telegram_id}:`, err);
+        res.status(500).json({ detail: err.message });
+    } finally {
+        client.release();
+    }
+});
+
+
+// Получение содержимого кейса
 app.get('/api/case/items_full', async (req, res) => {
     try {
         const { rows } = await pgPool.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
@@ -200,34 +314,8 @@ app.get('/api/case/items_full', async (req, res) => {
     }
 });
 
-app.post('/api/case/get-winnings', async (req, res) => {
-    const { user_id, quantity } = req.body;
-    if (!user_id || !quantity) {
-        return res.status(400).json({ error: 'Неверные данные' });
-    }
-    const client = await pgPool.connect();
-    try {
-        await client.query('BEGIN');
-        const caseItemsResult = await client.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
-        if (caseItemsResult.rows.length === 0) throw new Error('Кейс пуст');
-        const caseItems = caseItemsResult.rows;
-        
-        const wonItems = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
 
-        for (const item of wonItems) {
-            await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [user_id, item.id]);
-        }
-        await client.query('COMMIT');
-        res.json({ success: true, wonItems });
-    } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
-    }
-});
-
-
+// Получение настроек игры
 app.get('/api/game_settings', async (req, res) => {
     try {
         const { rows } = await pgPool.query("SELECT key, value FROM game_settings");
@@ -238,6 +326,7 @@ app.get('/api/game_settings', async (req, res) => {
     }
 });
 
+// Получение данных о текущем конкурсе
 app.get('/api/contest/current', async (req, res) => {
     const now = Date.now();
     try {
@@ -262,26 +351,6 @@ app.get('/api/contest/current', async (req, res) => {
     }
 });
 
-app.post('/api/contest/buy-ticket', async (req, res) => {
-    const { contest_id, telegram_id, quantity } = req.body;
-    if (!contest_id || !telegram_id || !quantity || quantity < 1) {
-        return res.status(400).json({ error: 'Неверные данные' });
-    }
-    const client = await pgPool.connect();
-    try {
-        await client.query('BEGIN');
-        for (let i = 0; i < quantity; i++) {
-            await client.query("INSERT INTO user_tickets (contest_id, user_id, telegram_id) VALUES ($1, $2, $3)", [contest_id, telegram_id, telegram_id]);
-        }
-        await client.query('COMMIT');
-        res.json({ success: true });
-    } catch (err) {
-        await client.query('ROLLBACK');
-        res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
-    }
-});
 
 // --- API Маршруты (админские) ---
 app.use('/api/admin', checkAdminSecret);
