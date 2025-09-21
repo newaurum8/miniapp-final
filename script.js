@@ -1,4 +1,8 @@
 document.addEventListener('DOMContentLoaded', function() {
+    // --- ВАЖНО: Укажите здесь полный URL вашего бэкенд-сервера! ---
+    // Я вставил ваш URL с Render. Если ваш бэкенд на другом адресе, измените его.
+    const API_BASE_URL = 'https://mmmmmm-mf64.onrender.com';
+
     // --- ГЛОБАЛЬНЫЙ СТАТУС ---
     const STATE = {
         user: null,
@@ -45,35 +49,9 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => UI.notificationToast.classList.remove('visible'), 3000);
     }
 
-    // --- НОВАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ БАЛАНСА ---
-    /*
-    async function syncBalanceWithBot(balanceChange) {
-        if (!STATE.user || !STATE.user.telegram_id || balanceChange === 0) return;
-        try {
-            const response = await fetch('/api/user/update-balance', { // Используем новый эндпоинт
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    telegram_id: STATE.user.telegram_id,
-                    balance_change: balanceChange // Отправляем изменение, а не новый баланс
-                })
-            });
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to sync balance with bot');
-            }
-            console.log('Balance sync successful for change:', balanceChange);
-        } catch (error) {
-            console.error("Ошибка синхронизации баланса с ботом:", error);
-            showNotification('Ошибка синхронизации баланса.');
-        }
-    }
-    */
-
-
     async function authenticateUser(tgUser) {
         try {
-            const response = await fetch('/api/user/get-or-create', {
+            const response = await fetch(`${API_BASE_URL}/api/user/get-or-create`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -97,7 +75,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadInventory() {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const response = await fetch(`/api/user/inventory?user_id=${STATE.user.id}`);
+            const response = await fetch(`${API_BASE_URL}/api/user/inventory?user_id=${STATE.user.id}`);
             if (!response.ok) throw new Error('Could not fetch inventory');
             const inventoryData = await response.json();
             STATE.inventory = inventoryData;
@@ -116,7 +94,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const user = tg.initDataUnsafe.user;
             if (user && user.id) {
                 if (UI.profilePhoto) UI.profilePhoto.src = user.photo_url || '';
-                if (UI.profileName) UI.profileName.textContent = `${user.first_name || ''} ${user.last_name || ''}`.trim();
+                if (UI.profileName) UI.profileName.textContent = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim();
                 if (UI.profileId) UI.profileId.textContent = `ID ${user.id}`;
                 authenticateUser(user);
             } else {
@@ -254,7 +232,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function sellFromInventory(itemToSell) {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const response = await fetch('/api/user/inventory/sell', {
+            const response = await fetch(`${API_BASE_URL}/api/user/inventory/sell`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ user_id: STATE.user.id, unique_id: itemToSell.uniqueId })
@@ -332,7 +310,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < totalCost) return showNotification("Недостаточно средств.");
 
         try {
-            const response = await fetch('/api/case/open', {
+            const response = await fetch(`${API_BASE_URL}/api/case/open`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ user_id: STATE.user.id, quantity: STATE.openQuantity })
@@ -450,7 +428,6 @@ document.addEventListener('DOMContentLoaded', function() {
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async () => {
             STATE.userBalance += totalValue;
             updateBalanceDisplay();
-            // syncBalanceWithBot(totalValue); // Синхронизируем продажу
             showNotification('Предметы проданы!');
             await finalizeAction();
         });
@@ -471,7 +448,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadContestData() {
         if (!STATE.user || !STATE.user.telegram_id) return;
         try {
-            const response = await fetch(`/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
+            const response = await fetch(`${API_BASE_URL}/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
             if (!response.ok) throw new Error('Network error');
             STATE.contest = await response.json();
             updateContestUI();
@@ -510,7 +487,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < totalCost) return showNotification('Недостаточно средств.');
 
         try {
-            const response = await fetch('/api/contest/buy-ticket', {
+            const response = await fetch(`${API_BASE_URL}/api/contest/buy-ticket`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -642,8 +619,6 @@ document.addEventListener('DOMContentLoaded', function() {
         STATE.upgradeState.isUpgrading = true;
         UI.performUpgradeBtn.disabled = true;
 
-        // syncBalanceWithBot(-yourItem.value); // Списываем предмет для апгрейда
-
         const isSuccess = (Math.random() * 100) < chance;
         const chanceAngle = (chance / 100) * 360;
         const randomOffset = Math.random() * 0.9 + 0.05;
@@ -658,7 +633,6 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(async () => {
                 if (isSuccess) {
                     showNotification(`Апгрейд успешный! Вы получили ${desiredItem.name}.`);
-                    // syncBalanceWithBot(desiredItem.value); // Начисляем новый предмет
                     STATE.gameHistory.push({ ...desiredItem, date: new Date(), name: `Апгрейд до ${desiredItem.name}`, value: desiredItem.value });
                 } else {
                     showNotification(`К сожалению, апгрейд не удался. Предмет потерян.`);
@@ -691,7 +665,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
         STATE.userBalance -= bet;
         updateBalanceDisplay();
-        // syncBalanceWithBot(-bet); // Синхронизация
         STATE.minerState.isActive = true;
         STATE.minerState.bet = bet;
         STATE.minerState.openedCrystals = 0;
@@ -777,7 +750,6 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification(`Выигрыш ${STATE.minerState.totalWin.toFixed(2)} ⭐ зачислен!`);
             STATE.userBalance += STATE.minerState.totalWin;
             updateBalanceDisplay();
-            // syncBalanceWithBot(STATE.minerState.totalWin); // Синхронизация
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
         }
@@ -801,7 +773,6 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.slotsSpinBtn.disabled = true;
         STATE.userBalance -= bet;
         updateBalanceDisplay();
-        // syncBalanceWithBot(-bet); // Синхронизация
         UI.slotsPayline.classList.remove('visible');
 
         const results = [];
@@ -844,7 +815,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (win > 0) {
             STATE.userBalance += win;
             updateBalanceDisplay();
-            // syncBalanceWithBot(win); // Синхронизация
             UI.slotsPayline.classList.add('visible');
             showNotification(`${message} (+${win.toFixed(0)} ⭐)`);
         } else {
@@ -874,7 +844,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
         STATE.userBalance -= bet;
         updateBalanceDisplay();
-        // syncBalanceWithBot(-bet); // Синхронизация
         STATE.towerState.isActive = true;
         STATE.towerState.bet = bet;
         STATE.towerState.currentLevel = 0;
@@ -956,7 +925,6 @@ document.addEventListener('DOMContentLoaded', function() {
             const winAmount = STATE.towerState.payouts[STATE.towerState.currentLevel - 1];
             STATE.userBalance += winAmount;
             updateBalanceDisplay();
-            // syncBalanceWithBot(winAmount); // Синхронизация
             showNotification(`Выигрыш ${winAmount.toLocaleString('ru-RU')} ⭐ зачислен!`);
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
@@ -992,7 +960,6 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.coinflipResult.textContent = '';
         STATE.userBalance -= bet;
         updateBalanceDisplay();
-        // syncBalanceWithBot(-bet); // Списываем ставку
         const result = Math.random() < 0.5 ? 'heads' : 'tails';
         UI.coin.addEventListener('transitionend', () => {
             if (playerChoice === result) {
@@ -1000,7 +967,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 STATE.userBalance += winAmount;
                 UI.coinflipResult.textContent = `Вы выиграли ${bet} ⭐!`;
                 showNotification(`Победа!`);
-                // syncBalanceWithBot(winAmount); // Начисляем выигрыш
             } else {
                 UI.coinflipResult.textContent = `Вы проиграли ${bet} ⭐.`;
                 showNotification(`Проигрыш!`);
@@ -1047,7 +1013,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
             STATE.userBalance += balanceChange + (playerChoice === computerChoice ? bet : 0); // Обновляем баланс
             updateBalanceDisplay();
-            // syncBalanceWithBot(balanceChange); // Синхронизируем изменение
             UI.rpsResultMessage.textContent = resultMessage;
 
             setTimeout(() => {
@@ -1064,7 +1029,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadInitialData() {
         try {
-            const [caseResponse, settingsResponse] = await Promise.all([ fetch('/api/case/items_full'), fetch('/api/game_settings') ]);
+            const [caseResponse, settingsResponse] = await Promise.all([ fetch(`${API_BASE_URL}/api/case/items_full`), fetch(`${API_BASE_URL}/api/game_settings`) ]);
             if (!caseResponse.ok) throw new Error(`Ошибка загрузки кейсов: ${caseResponse.status}`);
             if (!settingsResponse.ok) throw new Error(`Ошибка загрузки настроек: ${settingsResponse.status}`);
             STATE.possibleItems = await caseResponse.json();
