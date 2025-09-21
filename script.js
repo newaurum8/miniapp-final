@@ -36,12 +36,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- ОБЪЕКТ С ЭЛЕМЕНТАМИ DOM ---
     const UI = {};
 
-    // --- ЕДИНЫЙ URL ДЛЯ ВСЕХ ЗАПРОСОВ ---
-    // !!! ВАЖНОЕ ИЗМЕНЕНИЕ !!!
-    // Укажите здесь публичный адрес вашего Python-сервера (где запущен webhook_handler.py)
-    const API_BASE_URL = '';
-    const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
-
     // --- ФУНКЦИИ ---
 
     function showNotification(message) {
@@ -51,9 +45,33 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => UI.notificationToast.classList.remove('visible'), 3000);
     }
 
+    // --- НОВАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ БАЛАНСА ---
+    async function syncBalanceWithBot(balanceChange) {
+        if (!STATE.user || !STATE.user.telegram_id || balanceChange === 0) return;
+        try {
+            const response = await fetch('/api/user/update-balance', { // Используем новый эндпоинт
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    telegram_id: STATE.user.telegram_id,
+                    balance_change: balanceChange // Отправляем изменение, а не новый баланс
+                })
+            });
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to sync balance with bot');
+            }
+            console.log('Balance sync successful for change:', balanceChange);
+        } catch (error) {
+            console.error("Ошибка синхронизации баланса с ботом:", error);
+            showNotification('Ошибка синхронизации баланса.');
+        }
+    }
+
+
     async function authenticateUser(tgUser) {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/user/get-or-create`, {
+            const response = await fetch('/api/user/get-or-create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -74,56 +92,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function updateBalanceOnServer(delta, reason) {
-        if (!STATE.user || typeof STATE.user.telegram_id !== 'number') {
-            showNotification('Ошибка: Пользователь не авторизован.');
-            return false;
-        }
-
-        try {
-            const requestBody = {
-                user_id: STATE.user.telegram_id, 
-                delta: delta,
-                reason: reason || "mini_app_action" 
-            };
-            const requestBodyString = JSON.stringify(requestBody);
-            const signature = CryptoJS.HmacSHA256(requestBodyString, MINI_APP_SECRET_KEY).toString(CryptoJS.enc.Hex);
-            const idempotencyKey = `${STATE.user.telegram_id}-${Date.now()}`;
-            
-            const response = await fetch(`${API_BASE_URL}/api/v1/balance/change`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Signature': signature,
-                    'X-Idempotency-Key': idempotencyKey
-                },
-                body: requestBodyString
-            });
-            
-            const result = await response.json();
-
-            if (!response.ok) {
-                throw new Error(result.detail || 'Не удалось обновить баланс.');
-            }
-
-            STATE.userBalance = result.new_balance;
-            updateBalanceDisplay();
-            return true; 
-
-        } catch (error) {
-            console.error('Ошибка синхронизации баланса:', error);
-            showNotification(error.message || 'Ошибка синхронизации баланса.');
-            if (window.Telegram.WebApp.initDataUnsafe.user) {
-                await authenticateUser(window.Telegram.WebApp.initDataUnsafe.user);
-            }
-            return false;
-        }
-    }
-
     async function loadInventory() {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const response = await fetch(`${API_BASE_URL}/api/user/inventory?user_id=${STATE.user.id}`);
+            const response = await fetch(`/api/user/inventory?user_id=${STATE.user.id}`);
             if (!response.ok) throw new Error('Could not fetch inventory');
             const inventoryData = await response.json();
             STATE.inventory = inventoryData;
@@ -132,6 +104,7 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error("Ошибка загрузки инвентаря:", error);
         }
     }
+
 
     function loadTelegramData() {
         try {
@@ -271,18 +244,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     Продать за <span class="icon">⭐</span> ${item.value.toLocaleString('ru-RU')}
                 </button>
             `;
-            itemEl.querySelector('.inventory-sell-btn').addEventListener('click', () => sellFromInventory(item.uniqueId));
+            itemEl.querySelector('.inventory-sell-btn').addEventListener('click', () => sellFromInventory(item)); // Передаем весь объект
             UI.inventoryContent.appendChild(itemEl);
         });
     }
 
-    async function sellFromInventory(uniqueId) {
+    async function sellFromInventory(itemToSell) {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const response = await fetch(`${API_BASE_URL}/api/user/inventory/sell`, {
+            const response = await fetch('/api/user/inventory/sell', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: STATE.user.id, unique_id: uniqueId })
+                body: JSON.stringify({ user_id: STATE.user.id, unique_id: itemToSell.uniqueId })
             });
             const result = await response.json();
             if (!result.success) throw new Error(result.error || 'Server error');
@@ -297,6 +270,7 @@ document.addEventListener('DOMContentLoaded', function() {
             showNotification('Не удалось продать предмет.');
         }
     }
+
 
     function renderHistory() {
         if (!UI.historyContent) return;
@@ -356,7 +330,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.userBalance < totalCost) return showNotification("Недостаточно средств.");
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/case/open`, {
+            const response = await fetch('/api/case/open', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ user_id: STATE.user.id, quantity: STATE.openQuantity })
@@ -449,7 +423,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="inventory-item">
                     <img src="${item.imageSrc}" alt="${item.name}">
                     <div class="inventory-item-name">${item.name}</div>
-                    <div class="inventory-item-price">⭐ ${totalValue > 0 ? item.value.toLocaleString('ru-RU') : ''}</div>
+                    <div class="inventory-item-price">⭐ ${item.value.toLocaleString('ru-RU')}</div>
                 </div>`).join('')}
             </div>
             <div class="result-buttons">
@@ -458,37 +432,25 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>`;
         UI.resultModal.appendChild(modalContent);
 
-        const finalizeAction = async (inventoryNeedsReload) => {
+        const finalizeAction = async () => {
             hideModal(UI.resultModal);
             UI.spinView.classList.add('hidden');
             UI.caseView.classList.remove('hidden');
             STATE.isSpinning = false;
-            if (inventoryNeedsReload) {
-                await loadInventory();
-            }
+            await loadInventory();
         };
 
-        modalContent.querySelector('.close-btn').addEventListener('click', () => finalizeAction(true));
+        modalContent.querySelector('.close-btn').addEventListener('click', finalizeAction);
         modalContent.querySelector('#result-spin-again-btn').addEventListener('click', () => {
-            finalizeAction(true);
+            finalizeAction();
             setTimeout(handleCaseClick, 100);
         });
-        
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async () => {
-            const sellBtn = modalContent.querySelector('#result-sell-btn');
-            sellBtn.disabled = true;
-            sellBtn.textContent = 'Продажа...';
-
-            const success = await updateBalanceOnServer(totalValue, `Продажа ${STATE.lastWonItems.length} предметов из кейса`);
-            
-            if (success) {
-                showNotification('Предметы проданы!');
-                await finalizeAction(false);
-            } else {
-                showNotification('Ошибка при продаже предметов.');
-                sellBtn.disabled = false;
-                sellBtn.innerHTML = `Продать все за ⭐ ${totalValue.toLocaleString('ru-RU')}`;
-            }
+            STATE.userBalance += totalValue;
+            updateBalanceDisplay();
+            // syncBalanceWithBot(totalValue); // Синхронизируем продажу
+            showNotification('Предметы проданы!');
+            await finalizeAction();
         });
         showModal(UI.resultModal);
     }
@@ -507,7 +469,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadContestData() {
         if (!STATE.user || !STATE.user.telegram_id) return;
         try {
-            const response = await fetch(`${API_BASE_URL}/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
+            const response = await fetch(`/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
             if (!response.ok) throw new Error('Network error');
             STATE.contest = await response.json();
             updateContestUI();
@@ -544,33 +506,30 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!STATE.contest || !STATE.user) return showNotification('Ошибка: данные не загружены.');
         const totalCost = STATE.contest.ticket_price * STATE.ticketQuantity;
         if (STATE.userBalance < totalCost) return showNotification('Недостаточно средств.');
-        
-        const success = await updateBalanceOnServer(-totalCost, `Покупка ${STATE.ticketQuantity} билета(ов)`);
-        
-        if (success) {
-            try {
-                const response = await fetch(`${API_BASE_URL}/api/contest/buy-ticket`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contest_id: STATE.contest.id,
-                        telegram_id: STATE.user.telegram_id,
-                        quantity: STATE.ticketQuantity
-                    })
-                });
-                const result = await response.json();
-                if (!result.success) throw new Error(result.error);
-                
-                showNotification(`Вы успешно приобрели ${STATE.ticketQuantity} билет(ов)!`);
-                await loadContestData();
-            } catch (error) {
-                console.error("Ошибка при покупке билета (после списания):", error);
-                showNotification(error.message);
-                await updateBalanceOnServer(totalCost, `Возврат за неудачную покупку билета`);
+
+        try {
+            const response = await fetch('/api/contest/buy-ticket', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contest_id: STATE.contest.id,
+                    telegram_id: STATE.user.telegram_id,
+                    quantity: STATE.ticketQuantity
+                })
+            });
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error);
             }
+            STATE.userBalance = result.newBalance;
+            updateBalanceDisplay();
+            showNotification(`Вы успешно приобрели ${STATE.ticketQuantity} билет(ов)!`);
+            await loadContestData();
+        } catch (error) {
+            console.error("Ошибка при покупке билета:", error);
+            showNotification(error.message);
         }
     }
-
 
     function updateTimer() {
         if (!UI.contestTimer || !STATE.contest || !STATE.contest.end_time) {
@@ -585,8 +544,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const d = Math.floor(timeLeft / 86400000), h = Math.floor((timeLeft % 86400000) / 3600000), m = Math.floor((timeLeft % 3600000) / 60000), s = Math.floor((timeLeft % 60000) / 1000);
         UI.contestTimer.textContent = `${d}д ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} 🕔`;
     }
-
-    // --- ОСТАЛЬНЫЕ ИГРОВЫЕ ФУНКЦИИ ---
 
     function resetUpgradeState(resetRotation = false) {
         if (!UI.upgradePointer) return;
@@ -679,8 +636,12 @@ document.addEventListener('DOMContentLoaded', function() {
     async function handleUpgradeClick() {
         const { yourItem, desiredItem, chance, isUpgrading } = STATE.upgradeState;
         if (!yourItem || !desiredItem || isUpgrading) return;
+
         STATE.upgradeState.isUpgrading = true;
         UI.performUpgradeBtn.disabled = true;
+
+        syncBalanceWithBot(-yourItem.value); // Списываем предмет для апгрейда
+
         const isSuccess = (Math.random() * 100) < chance;
         const chanceAngle = (chance / 100) * 360;
         const randomOffset = Math.random() * 0.9 + 0.05;
@@ -693,13 +654,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
         UI.upgradePointer.addEventListener('transitionend', () => {
             setTimeout(async () => {
-                const itemIndex = STATE.inventory.findIndex(invItem => invItem.uniqueId === yourItem.uniqueId);
-                if (itemIndex > -1) STATE.inventory.splice(itemIndex, 1);
                 if (isSuccess) {
                     showNotification(`Апгрейд успешный! Вы получили ${desiredItem.name}.`);
-                    const newItem = { ...desiredItem, uniqueId: Date.now() };
-                    STATE.inventory.push(newItem);
-                    STATE.gameHistory.push({ ...newItem, date: new Date(), name: `Апгрейд до ${newItem.name}`, value: newItem.value });
+                    syncBalanceWithBot(desiredItem.value); // Начисляем новый предмет
+                    STATE.gameHistory.push({ ...desiredItem, date: new Date(), name: `Апгрейд до ${desiredItem.name}`, value: desiredItem.value });
                 } else {
                     showNotification(`К сожалению, апгрейд не удался. Предмет потерян.`);
                     STATE.gameHistory.push({ ...yourItem, date: new Date(), name: `Неудачный апгрейд ${yourItem.name}`, value: -yourItem.value });
@@ -725,14 +683,13 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.minerInfoWrapper.classList.add('hidden');
     }
 
-    async function startMinerGame() {
+    function startMinerGame() {
         const bet = parseInt(UI.minerBetInput.value);
         if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка");
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
-
-        const success = await updateBalanceOnServer(-bet, "Ставка в Miner");
-        if (!success) return;
-
+        STATE.userBalance -= bet;
+        updateBalanceDisplay();
+        syncBalanceWithBot(-bet); // Синхронизация
         STATE.minerState.isActive = true;
         STATE.minerState.bet = bet;
         STATE.minerState.openedCrystals = 0;
@@ -812,12 +769,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function endMinerGame(isWin) {
+    function endMinerGame(isWin) {
         STATE.minerState.isActive = false;
         if (isWin) {
-            const winAmount = STATE.minerState.totalWin;
-            showNotification(`Выигрыш ${winAmount.toFixed(2)} ⭐ зачислен!`);
-            await updateBalanceOnServer(winAmount, "Выигрыш в Miner");
+            showNotification(`Выигрыш ${STATE.minerState.totalWin.toFixed(2)} ⭐ зачислен!`);
+            STATE.userBalance += STATE.minerState.totalWin;
+            updateBalanceDisplay();
+            syncBalanceWithBot(STATE.minerState.totalWin); // Синхронизация
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
         }
@@ -831,17 +789,17 @@ document.addEventListener('DOMContentLoaded', function() {
         endMinerGame(true);
     }
 
-    async function handleSlotsSpin() {
+    function handleSlotsSpin() {
         if (!UI.slotsSpinBtn || STATE.slotsState.isSpinning) return;
         const bet = parseInt(UI.slotsBetInput.value);
         if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка");
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
 
-        const success = await updateBalanceOnServer(-bet, "Ставка в Slots");
-        if (!success) return;
-
         STATE.slotsState.isSpinning = true;
         UI.slotsSpinBtn.disabled = true;
+        STATE.userBalance -= bet;
+        updateBalanceDisplay();
+        syncBalanceWithBot(-bet); // Синхронизация
         UI.slotsPayline.classList.remove('visible');
 
         const results = [];
@@ -870,7 +828,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    async function processSlotsResult(results, bet) {
+    function processSlotsResult(results, bet) {
         let win = 0;
         let message = "Попробуйте еще раз!";
         const [r1, r2, r3] = results;
@@ -882,7 +840,9 @@ document.addEventListener('DOMContentLoaded', function() {
             message = `Неплохо! Выигрыш x1.5!`;
         }
         if (win > 0) {
-            await updateBalanceOnServer(win, "Выигрыш в Slots");
+            STATE.userBalance += win;
+            updateBalanceDisplay();
+            syncBalanceWithBot(win); // Синхронизация
             UI.slotsPayline.classList.add('visible');
             showNotification(`${message} (+${win.toFixed(0)} ⭐)`);
         } else {
@@ -906,14 +866,13 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.towerMaxWinDisplay.textContent = 'Возможный выигрыш: 0 ⭐';
     }
 
-    async function startTowerGame() {
+    function startTowerGame() {
         const bet = parseInt(UI.towerBetInput.value);
         if (isNaN(bet) || bet < 15) return showNotification("Минимальная ставка 15 ⭐");
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
-
-        const success = await updateBalanceOnServer(-bet, "Ставка в Tower");
-        if (!success) return;
-
+        STATE.userBalance -= bet;
+        updateBalanceDisplay();
+        syncBalanceWithBot(-bet); // Синхронизация
         STATE.towerState.isActive = true;
         STATE.towerState.bet = bet;
         STATE.towerState.currentLevel = 0;
@@ -987,13 +946,15 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    async function endTowerGame(isWin) {
+    function endTowerGame(isWin) {
         if (STATE.towerState.nextLevelTimeout) clearTimeout(STATE.towerState.nextLevelTimeout);
         STATE.towerState.isActive = false;
         UI.towerCashoutBtn.disabled = true;
         if (isWin && STATE.towerState.currentLevel > 0) {
             const winAmount = STATE.towerState.payouts[STATE.towerState.currentLevel - 1];
-            await updateBalanceOnServer(winAmount, "Выигрыш в Tower");
+            STATE.userBalance += winAmount;
+            updateBalanceDisplay();
+            syncBalanceWithBot(winAmount); // Синхронизация
             showNotification(`Выигрыш ${winAmount.toLocaleString('ru-RU')} ⭐ зачислен!`);
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
@@ -1020,27 +981,29 @@ document.addEventListener('DOMContentLoaded', function() {
         endTowerGame(true);
     }
 
-    async function handleCoinflip(playerChoice) {
+    function handleCoinflip(playerChoice) {
         if (!UI.coin || STATE.coinflipState.isFlipping) return;
         const bet = parseInt(UI.coinflipBetInput.value);
         if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка");
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
-
-        const success = await updateBalanceOnServer(-bet, "Ставка в Coinflip");
-        if (!success) return;
-
         STATE.coinflipState.isFlipping = true;
         UI.coinflipResult.textContent = '';
+        STATE.userBalance -= bet;
+        updateBalanceDisplay();
+        syncBalanceWithBot(-bet); // Списываем ставку
         const result = Math.random() < 0.5 ? 'heads' : 'tails';
-        UI.coin.addEventListener('transitionend', async () => {
+        UI.coin.addEventListener('transitionend', () => {
             if (playerChoice === result) {
-                await updateBalanceOnServer(bet * 2, "Выигрыш в Coinflip");
+                const winAmount = bet * 2;
+                STATE.userBalance += winAmount;
                 UI.coinflipResult.textContent = `Вы выиграли ${bet} ⭐!`;
                 showNotification(`Победа!`);
+                syncBalanceWithBot(winAmount); // Начисляем выигрыш
             } else {
                 UI.coinflipResult.textContent = `Вы проиграли ${bet} ⭐.`;
                 showNotification(`Проигрыш!`);
             }
+            updateBalanceDisplay();
             STATE.coinflipState.isFlipping = false;
             UI.coin.style.transition = 'none';
             UI.coin.style.transform = result === 'tails' ? 'rotateY(180deg)' : 'rotateY(0deg)';
@@ -1051,15 +1014,11 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.coin.style.transform = `rotateY(${currentRotation + fullSpins + (result === 'tails' ? 180 : 0)}deg)`;
     }
 
-    async function handleRps(playerChoice) {
+    function handleRps(playerChoice) {
         if (!UI.rpsComputerChoice || STATE.rpsState.isPlaying) return;
         const bet = parseInt(UI.rpsBetInput.value);
         if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка");
         if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
-        
-        const success = await updateBalanceOnServer(-bet, "Ставка в RPS");
-        if (!success) return;
-
         STATE.rpsState.isPlaying = true;
         UI.rpsButtons.forEach(button => button.disabled = true);
         UI.rpsPlayerChoice.textContent = STATE.rpsState.choiceMap[playerChoice];
@@ -1069,20 +1028,26 @@ document.addEventListener('DOMContentLoaded', function() {
         const reel = Array.from({ length: reelLength }, (_, i) => STATE.rpsState.choiceMap[i === winnerIndex ? computerChoice : STATE.rpsState.choices[Math.floor(Math.random() * 3)]]);
         UI.rpsComputerChoice.innerHTML = reel.map(symbol => `<div class="rps-roulette-item">${symbol}</div>`).join('');
         const targetPosition = (winnerIndex * 130) + 65;
-        UI.rpsComputerChoice.addEventListener('transitionend', async () => {
+        UI.rpsComputerChoice.addEventListener('transitionend', () => {
             let resultMessage = '';
+            let balanceChange = -bet; // По умолчанию проигрыш
             if (playerChoice === computerChoice) {
                 resultMessage = "Ничья!";
-                await updateBalanceOnServer(bet, "Возврат ставки в RPS (ничья)");
+                balanceChange = 0; // Возвращаем ставку
             } else if ((playerChoice === 'rock' && computerChoice === 'scissors') || (playerChoice === 'paper' && computerChoice === 'rock') || (playerChoice === 'scissors' && computerChoice === 'paper')) {
                 resultMessage = `Вы выиграли ${bet} ⭐!`;
-                await updateBalanceOnServer(bet * 2, "Выигрыш в RPS");
+                balanceChange = bet; // Чистый выигрыш
                 showNotification(`Победа!`);
             } else {
                 resultMessage = `Вы проиграли ${bet} ⭐.`;
                 showNotification(`Проигрыш!`);
             }
+
+            STATE.userBalance += balanceChange + (playerChoice === computerChoice ? bet : 0); // Обновляем баланс
+            updateBalanceDisplay();
+            syncBalanceWithBot(balanceChange); // Синхронизируем изменение
             UI.rpsResultMessage.textContent = resultMessage;
+
             setTimeout(() => {
                 STATE.rpsState.isPlaying = false;
                 UI.rpsButtons.forEach(button => button.disabled = false);
@@ -1097,7 +1062,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadInitialData() {
         try {
-            const [caseResponse, settingsResponse] = await Promise.all([ fetch(`${API_BASE_URL}/api/case/items_full`), fetch(`${API_BASE_URL}/api/game_settings`) ]);
+            const [caseResponse, settingsResponse] = await Promise.all([ fetch('/api/case/items_full'), fetch('/api/game_settings') ]);
             if (!caseResponse.ok) throw new Error(`Ошибка загрузки кейсов: ${caseResponse.status}`);
             if (!settingsResponse.ok) throw new Error(`Ошибка загрузки настроек: ${settingsResponse.status}`);
             STATE.possibleItems = await caseResponse.json();
@@ -1171,12 +1136,7 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         for (const key in selectors) {
-            const element = document.querySelector(selectors[key]);
-            if (element) {
-                UI[key] = element;
-            } else {
-                console.warn(`Element with selector "${selectors[key]}" not found for UI key "${key}".`);
-            }
+            UI[key] = document.querySelector(selectors[key]);
         }
         UI.views = document.querySelectorAll('.view');
         UI.navButtons = document.querySelectorAll('.nav-btn');
@@ -1242,4 +1202,3 @@ document.addEventListener('DOMContentLoaded', function() {
         document.body.innerHTML = `<div style="color: white; padding: 20px;">Произошла критическая ошибка: ${error.message}. Пожалуйста, проверьте консоль (F12).</div>`;
     }
 });
-
