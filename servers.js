@@ -71,12 +71,17 @@ app.post('/api/user/get-or-create', async (req, res) => {
         return res.status(400).json({ error: "telegram_id является обязательным" });
     }
     try {
-        // Используем user_id как основной ключ и balance_uah для баланса
         let userResult = await pool.query("SELECT user_id, username, balance_uah FROM users WHERE user_id = $1", [telegram_id]);
+        
+        const formatUser = (dbUser) => ({
+            id: dbUser.user_id,
+            telegram_id: dbUser.user_id, // <-- ИЗМЕНЕНИЕ: Добавлено это поле для консистентности
+            username: dbUser.username,
+            balance: parseFloat(dbUser.balance_uah)
+        });
+
         if (userResult.rows.length > 0) {
-            // Преобразуем для совместимости с фронтендом, который ожидает 'id' и 'balance'
-            const user = { ...userResult.rows[0], id: userResult.rows[0].user_id, balance: parseFloat(userResult.rows[0].balance_uah) };
-            res.json(user);
+            res.json(formatUser(userResult.rows[0]));
         } else {
             const initialBalance = 1000.00;
             const newUserResult = await pool.query(
@@ -84,13 +89,10 @@ app.post('/api/user/get-or-create', async (req, res) => {
                 [telegram_id, username, initialBalance]
             );
              if (newUserResult.rows.length > 0) {
-                const user = { ...newUserResult.rows[0], id: newUserResult.rows[0].user_id, balance: parseFloat(newUserResult.rows[0].balance_uah) };
-                res.status(201).json(user);
+                res.status(201).json(formatUser(newUserResult.rows[0]));
              } else {
-                // Если пользователь уже существует, но INSERT..ON CONFLICT ничего не вернул, делаем повторный SELECT.
                 let existingUserResult = await pool.query("SELECT user_id, username, balance_uah FROM users WHERE user_id = $1", [telegram_id]);
-                const user = { ...existingUserResult.rows[0], id: existingUserResult.rows[0].user_id, balance: parseFloat(existingUserResult.rows[0].balance_uah) };
-                res.json(user);
+                res.json(formatUser(existingUserResult.rows[0]));
              }
         }
     } catch (err) {
@@ -100,7 +102,7 @@ app.post('/api/user/get-or-create', async (req, res) => {
 });
 
 app.post('/api/v1/balance/change', async (req, res) => {
-    const { user_id, delta } = req.body; // user_id это telegram_id
+    const { user_id, delta } = req.body; 
 
     if (typeof user_id !== 'number' || typeof delta !== 'number') {
         return res.status(400).json({ detail: "Неверные параметры запроса." });
@@ -110,16 +112,12 @@ app.post('/api/v1/balance/change', async (req, res) => {
     try {
         await client.query('BEGIN');
         const userResult = await client.query("SELECT balance_uah FROM users WHERE user_id = $1 FOR UPDATE", [user_id]);
-        let currentBalance;
-
+        
         if (userResult.rows.length === 0) {
-            await client.query("INSERT INTO users (user_id, balance_uah) VALUES ($1, $2) ON CONFLICT (user_id) DO NOTHING", [user_id, 1000.00]);
-            const newUserBalanceResult = await client.query("SELECT balance_uah FROM users WHERE user_id = $1 FOR UPDATE", [user_id]);
-            currentBalance = parseFloat(newUserBalanceResult.rows[0].balance_uah);
-        } else {
-            currentBalance = parseFloat(userResult.rows[0].balance_uah);
+             throw new Error("Пользователь не найден для обновления баланса.");
         }
-
+        
+        const currentBalance = parseFloat(userResult.rows[0].balance_uah);
         const newBalance = currentBalance + delta;
 
         if (newBalance < 0) {
@@ -177,12 +175,11 @@ app.post('/api/user/inventory/sell', async (req, res) => {
         const itemValue = itemResult.rows[0].value;
 
         await client.query("DELETE FROM user_inventory WHERE id = $1", [unique_id]);
-        await client.query("UPDATE users SET balance_uah = balance_uah + $1 WHERE user_id = $2", [itemValue, user_id]);
+        const updateResult = await client.query("UPDATE users SET balance_uah = balance_uah + $1 WHERE user_id = $2 RETURNING balance_uah", [itemValue, user_id]);
 
         await client.query('COMMIT');
-
-        const userResult = await pool.query("SELECT balance_uah FROM users WHERE user_id = $1", [user_id]);
-        res.json({ success: true, newBalance: parseFloat(userResult.rows[0].balance_uah) });
+        
+        res.json({ success: true, newBalance: parseFloat(updateResult.rows[0].balance_uah) });
 
     } catch (err) {
         await client.query('ROLLBACK');
