@@ -102,45 +102,9 @@ app.post('/api/user/get-or-create', async (req, res) => {
     }
 });
 
-app.post('/api/v1/balance/change', async (req, res) => {
-    const { user_id, delta } = req.body; 
-
-    // ИСПРАВЛЕНИЕ: Улучшенная проверка и логирование для отладки
-    if (typeof user_id !== 'number' || typeof delta !== 'number' || isNaN(user_id) || isNaN(delta)) {
-        console.error(`Неверные параметры запроса: user_id=${user_id} (тип ${typeof user_id}), delta=${delta} (тип ${typeof delta})`);
-        return res.status(400).json({ detail: `Неверные параметры запроса. Получено: user_id (${typeof user_id}), delta (${typeof delta})` });
-    }
-
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        const userResult = await client.query("SELECT balance_uah FROM users WHERE user_id = $1 FOR UPDATE", [user_id]);
-        
-        if (userResult.rows.length === 0) {
-             await client.query('ROLLBACK');
-             console.error(`Пользователь ${user_id} не найден для обновления баланса.`);
-             return res.status(404).json({ detail: "Пользователь не найден." });
-        }
-        
-        const currentBalance = parseFloat(userResult.rows[0].balance_uah);
-        const newBalance = currentBalance + delta;
-
-        if (newBalance < 0) {
-            await client.query('ROLLBACK');
-            return res.status(400).json({ detail: "Недостаточно средств на балансе." });
-        }
-
-        await client.query("UPDATE users SET balance_uah = $1 WHERE user_id = $2", [newBalance, user_id]);
-        await client.query('COMMIT');
-        res.json({ status: "ok", message: "Balance updated successfully", new_balance: newBalance });
-    } catch (e) {
-        await client.query('ROLLBACK');
-        console.error(`Ошибка при изменении баланса для user ${user_id}: ${e}`);
-        res.status(500).json({ detail: "Внутренняя ошибка сервера" });
-    } finally {
-        client.release();
-    }
-});
+// ### УДАЛЕННЫЙ БЛОК ###
+// Маршрут /api/v1/balance/change был удален отсюда, 
+// так как его логика теперь полностью находится в webhook_handler.py
 
 app.get('/api/user/inventory', async (req, res) => {
     const { user_id } = req.query;
