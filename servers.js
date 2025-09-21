@@ -7,7 +7,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // Ваша строка подключения к базе данных NeonDB
-const connectionString = 'postgresql://neondb_owner:npg_xoO8NXpDn1fy@ep-hidden-sound-a23oyr8a-pooler.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+const connectionString = 'postgresql://neondb_owner:npg_gFvZxTR7qdw1@ep-round-sound-agieqqp0-pooler.c-2.eu-central-1.aws.neon.tech/neondb?sslmode=require';
 
 if (!connectionString) {
     console.error('Ошибка: Переменная окружения DATABASE_URL не установлена!');
@@ -464,3 +464,4 @@ app.listen(port, () => {
     console.log(`Сервер успешно запущен на порту ${port}`);
     checkDbConnection();
 });
+
