@@ -394,14 +394,16 @@ app.get('/api/admin/users', async (req, res) => {
     }
 });
 
-app.post('/api/admin/user/balance', async (req, res) => {
-    const { telegramId, newBalance } = req.body;
+// ИЗМЕНЕННЫЙ МАРШРУТ
+app.post('/api/admin/user/:userId/balance', async (req, res) => {
+    const { userId } = req.params;
+    const { newBalance } = req.body;
     try {
-        const result = await pool.query("UPDATE users SET balance_uah = $1 WHERE telegram_id = $2 RETURNING balance_uah", [newBalance, telegramId]);
+        const result = await pool.query("UPDATE users SET balance_uah = $1 WHERE id = $2 RETURNING id, balance_uah", [newBalance, userId]);
         if (result.rowCount > 0) {
             res.json({ success: true, newBalance: result.rows[0].balance_uah });
         } else {
-            res.status(404).json({ error: "User not found" });
+            res.status(404).json({ error: "Пользователь не найден" });
         }
     } catch (err) {
         res.status(500).json({ "error": err.message });
@@ -535,4 +537,3 @@ app.listen(port, () => {
     console.log(`Админ-панель: http://localhost:${port}/admin?secret=${ADMIN_SECRET}`);
     initializeDb();
 });
-
