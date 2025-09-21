@@ -37,7 +37,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const UI = {};
 
     // --- ЕДИНЫЙ URL ДЛЯ ВСЕХ ЗАПРОСОВ ---
-    const API_BASE_URL = 'https://mmmmmm-mf64.onrender.com'; 
+    // !!! ВАЖНОЕ ИЗМЕНЕНИЕ !!!
+    // Укажите здесь публичный адрес вашего Python-сервера (где запущен webhook_handler.py)
+    const API_BASE_URL = 'http://server4644.server-vps.com:8000';
     const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
 
     // --- ФУНКЦИИ ---
