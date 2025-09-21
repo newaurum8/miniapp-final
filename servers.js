@@ -2,7 +2,6 @@ const express = require('express');
 const { Pool } = require('pg');
 const cors = require('cors');
 const path = require('path');
-const crypto = require('crypto');
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -463,7 +462,5 @@ app.post('/api/admin/contest/draw/:id', async (req, res) => {
 
 app.listen(port, () => {
     console.log(`Сервер успешно запущен на порту ${port}`);
-    console.log(`Основной додаток: http://localhost:${port}`);
-    console.log(`Админ-панель: http://localhost:${port}/admin?secret=${ADMIN_SECRET}`);
     checkDbConnection();
 });
