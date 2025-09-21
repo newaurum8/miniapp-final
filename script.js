@@ -68,30 +68,26 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ========== ИЗМЕНЁННАЯ ФУНКЦИЯ ==========
+    // ========== ОБНОВЛЕННАЯ ФУНКЦИЯ ==========
     async function updateBalanceOnServer(delta, reason) {
-        if (!STATE.user || !STATE.user.id) {
+        if (!STATE.user || !STATE.user.telegram_id) {
             console.error("Пользователь не авторизован для обновления баланса на сервере.");
             return false;
         }
 
         try {
-            // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-            // Используем относительный путь, чтобы запрос шел на тот же сервер (servers.js),
-            // где и находится само приложение. Это устраняет все проблемы с соединением.
-            const response = await fetch('/api/v1/balance/change', {
-            // --- КОНЕЦ ИЗМЕНЕНИЯ ---
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    // servers.js ожидает telegram_id под именем user_id
-                    user_id: STATE.user.telegram_id, 
-                    delta: delta
-                })
-            });
+            const bodyPayload = {
+                user_id: STATE.user.telegram_id, 
+                delta: delta,
+                reason: reason || "game_action" 
+            };
 
+            const response = await fetch('/api/v1/balance/change', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(bodyPayload)
+            });
+            
             const result = await response.json();
 
             if (!response.ok) {
@@ -105,7 +101,9 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Ошибка синхронизации баланса:', error);
             showNotification(error.message || 'Ошибка синхронизации баланса.');
-            await authenticateUser(window.Telegram.WebApp.initDataUnsafe.user);
+            if (window.Telegram.WebApp.initDataUnsafe.user) {
+                await authenticateUser(window.Telegram.WebApp.initDataUnsafe.user);
+            }
             return false;
         }
     }
@@ -430,6 +428,7 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // ========== ОБНОВЛЕННАЯ ФУНКЦИЯ ==========
     function showResult() {
         UI.resultModal.innerHTML = '';
         const totalValue = STATE.lastWonItems.reduce((sum, item) => sum + item.value, 0);
@@ -464,11 +463,16 @@ document.addEventListener('DOMContentLoaded', function() {
             finalizeAction();
             setTimeout(handleCaseClick, 100);
         });
+        
+        // --- ИЗМЕНЕНИЕ: Заменена локальная логика на вызов серверной функции ---
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async () => {
-            STATE.userBalance += totalValue;
-            updateBalanceDisplay();
-            showNotification('Предметы проданы!');
-            await finalizeAction();
+            const success = await updateBalanceOnServer(totalValue, `Продажа ${STATE.lastWonItems.length} предметов из кейса`);
+            if (success) {
+                showNotification('Предметы проданы!');
+                await finalizeAction();
+            } else {
+                showNotification('Ошибка при продаже предметов.');
+            }
         });
         showModal(UI.resultModal);
     }
