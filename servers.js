@@ -156,7 +156,6 @@ async function initializeDb() {
     }
 }
 
-// ... (весь остальной код API маршрутов остается без изменений) ...
 // --- API Маршруты (клиентские) ---
 
 app.post('/api/user/get-or-create', async (req, res) => {
@@ -180,26 +179,6 @@ app.post('/api/user/get-or-create', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
-// НОВЫЙ ЭНДПОИНТ ДЛЯ СИНХРОНИЗАЦИИ
-app.post('/api/user/update-balance', async (req, res) => {
-    const { telegram_id, balance_change } = req.body;
-    if (!telegram_id || balance_change === undefined) {
-        return res.status(400).json({ error: "telegram_id и balance_change обязательны" });
-    }
-    try {
-        const result = await pool.query("UPDATE users SET balance_uah = balance_uah + $1 WHERE telegram_id = $2 RETURNING balance_uah", [balance_change, telegram_id]);
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: "User not found" });
-        }
-        res.json({ success: true, newBalance: result.rows[0].balance_uah });
-    } catch (err) {
-        console.error("Ошибка при обновлении баланса из бота:", err);
-        res.status(500).json({ error: err.message });
-    }
-});
-
-
 
 app.get('/api/user/inventory', async (req, res) => {
     const { user_id } = req.query;
@@ -429,7 +408,6 @@ app.post('/api/admin/user/balance', async (req, res) => {
     }
 });
 
-
 app.get('/api/admin/items', async (req, res) => {
     try {
         const { rows } = await pool.query('SELECT id, name, "imageSrc", value FROM items ORDER BY value DESC');
@@ -481,7 +459,7 @@ app.post('/api/admin/game_settings', async (req, res) => {
     try {
         await client.query('BEGIN');
         for (const [key, value] of Object.entries(settings)) {
-            await client.query("UPDATE game_settings SET value = $1 WHERE key = $2", [value.toString(), key]);
+            await client.query("INSERT INTO game_settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2", [key, value.toString()]);
         }
         await client.query('COMMIT');
         res.json({ success: true });
