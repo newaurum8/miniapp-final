@@ -65,10 +65,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
+    // ИЗМЕНЕННАЯ ФУНКЦИЯ
     function renderUsers(users) {
         usersTableBody.innerHTML = '';
         if (!users || users.length === 0) {
-            usersTableBody.innerHTML = '<tr><td colspan="5">Користувачі ще не зареєстровані.</td></tr>';
+            usersTableBody.innerHTML = '<tr><td colspan="5">Пользователи еще не зарегистрированы.</td></tr>';
             return;
         }
         users.forEach(user => {
@@ -78,42 +79,44 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td>${user.telegram_id || 'N/A'}</td>
                 <td>${user.username || 'N/A'}</td>
                 <td><input type="number" class="balance-input" value="${parseFloat(user.balance).toFixed(2)}"></td>
-                <td><button class="button-primary save-balance-btn" data-telegramid="${user.telegram_id}">Зберегти</button></td>
+                <td><button class="button-primary save-balance-btn" data-userid="${user.id}">Сохранить</button></td>
             `;
             usersTableBody.appendChild(row);
         });
     }
 
-    async function updateUserBalance(telegramId, newBalance) {
+    // ИЗМЕНЕННАЯ ФУНКЦИЯ
+    async function updateUserBalance(userId, newBalance) {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/admin/user/balance?secret=${ADMIN_SECRET_KEY}`, {
+            const response = await fetch(`${API_BASE_URL}/api/admin/user/${userId}/balance?secret=${ADMIN_SECRET_KEY}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ telegramId: Number(telegramId), newBalance: newBalance })
+                body: JSON.stringify({ newBalance: newBalance })
             });
             const result = await response.json();
             if (response.ok && result.success) {
-                alert(`Баланс користувача ${telegramId} успішно оновлено до ${result.newBalance}.`);
-                const input = usersTableBody.querySelector(`button[data-telegramid="${telegramId}"]`).closest('tr').querySelector('.balance-input');
+                alert(`Баланс пользователя ${userId} успешно обновлен до ${result.newBalance}.`);
+                const input = usersTableBody.querySelector(`button[data-userid="${userId}"]`).closest('tr').querySelector('.balance-input');
                 if (input) input.value = parseFloat(result.newBalance).toFixed(2);
             } else {
-                throw new Error(result.error || 'Сервер повернув помилку.');
+                throw new Error(result.error || 'Сервер вернул ошибку.');
             }
         } catch (error) {
-            console.error('Помилка:', error);
-            alert(`Не вдалося оновити баланс: ${error.message}`);
+            console.error('Ошибка:', error);
+            alert(`Не удалось обновить баланс: ${error.message}`);
         }
     }
 
+    // ИЗМЕНЕННЫЙ ОБРАБОТЧИК
     usersTableBody.addEventListener('click', (e) => {
         if (e.target.classList.contains('save-balance-btn')) {
-            const telegramId = e.target.dataset.telegramid;
+            const userId = e.target.dataset.userid;
             const balanceInput = e.target.closest('tr').querySelector('.balance-input');
             const newBalance = parseFloat(balanceInput.value);
-            if (telegramId && !isNaN(newBalance) && newBalance >= 0) {
-                updateUserBalance(telegramId, newBalance);
+            if (userId && !isNaN(newBalance) && newBalance >= 0) {
+                updateUserBalance(userId, newBalance);
             } else {
-                alert("Будь ласка, введіть коректне числове значення для балансу.");
+                alert("Пожалуйста, введите корректное числовое значение для баланса.");
             }
         }
     });
