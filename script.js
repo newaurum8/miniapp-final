@@ -70,15 +70,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // ========== ИЗМЕНЁННАЯ ФУНКЦИЯ ==========
     async function updateBalanceOnServer(delta, reason) {
-        if (!STATE.user || !STATE.user.id) { // Используем ID из объекта user, который возвращает servers.js
+        if (!STATE.user || !STATE.user.id) {
             console.error("Пользователь не авторизован для обновления баланса на сервере.");
             return false;
         }
 
         try {
             // --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
-            // Убираем сложный запрос на другой сервер и используем простой относительный путь,
-            // который будет обрабатываться вашим файлом servers.js
+            // Используем относительный путь, чтобы запрос шел на тот же сервер (servers.js),
+            // где и находится само приложение. Это устраняет все проблемы с соединением.
             const response = await fetch('/api/v1/balance/change', {
             // --- КОНЕЦ ИЗМЕНЕНИЯ ---
                 method: 'POST',
@@ -86,7 +86,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Content-Type': 'application/json',
                 },
                 body: JSON.stringify({
-                    user_id: STATE.user.id, // Отправляем ID, который получили от servers.js
+                    // servers.js ожидает telegram_id под именем user_id
+                    user_id: STATE.user.telegram_id, 
                     delta: delta
                 })
             });
