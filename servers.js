@@ -72,7 +72,7 @@ const checkAdminSecret = (req, res, next) => {
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/admin', checkAdminSecret, (req, res) => res.sendFile(path.join(__dirname, 'admin', 'index.html')));
 
-// ### НОВЫЙ ЕДИНЫЙ ЭНДПОИНТ ДЛЯ ИЗМЕНЕНИЯ БАЛАНСА ###
+// ### ЕДИНЫЙ ЭНДПОИНТ ДЛЯ ИЗМЕНЕНИЯ БАЛАНСА ###
 app.post('/api/v1/balance/change', checkSignature, async (req, res) => {
     const { user_id, delta } = req.body;
     const idempotencyKey = req.headers['x-idempotency-key'];
@@ -127,7 +127,7 @@ app.post('/api/v1/balance/change', checkSignature, async (req, res) => {
     }
 });
 
-// --- API Маршруты (клиентские) ---
+// --- API Маршруты ---
 app.post('/api/user/get-or-create', async (req, res) => {
     const { telegram_id, username } = req.body;
     if (!telegram_id) {
@@ -149,14 +149,9 @@ app.post('/api/user/get-or-create', async (req, res) => {
             const initialBalance = 1000.00;
             const newUserResult = await pgPool.query(
                 "INSERT INTO users (user_id, username, balance_uah) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET username = $2 RETURNING user_id, username, balance_uah",
-                [telegram_id, username, initialBalance]
+                [telegram_id, username || `User ${telegram_id}`, initialBalance]
             );
-             if (newUserResult.rows.length > 0) {
-                res.status(201).json(formatUser(newUserResult.rows[0]));
-             } else {
-                let existingUserResult = await pgPool.query("SELECT user_id, username, balance_uah FROM users WHERE user_id = $1", [telegram_id]);
-                res.json(formatUser(existingUserResult.rows[0]));
-             }
+            res.status(201).json(formatUser(newUserResult.rows[0]));
         }
     } catch (err) {
         console.error('Ошибка в /api/user/get-or-create:', err.message);
@@ -169,103 +164,61 @@ app.get('/api/user/inventory', async (req, res) => {
     if (!user_id) {
         return res.status(400).json({ error: 'user_id является обязательным' });
     }
-
-    const sql = `
-        SELECT ui.id AS "uniqueId", i.id, i.name, i."imageSrc", i.value
-        FROM user_inventory ui
-        JOIN items i ON ui.item_id = i.id
-        WHERE ui.user_id = $1
-    `;
     try {
-        const { rows } = await pgPool.query(sql, [user_id]);
+        const { rows } = await pgPool.query(
+            'SELECT ui.id AS "uniqueId", i.id, i.name, i."imageSrc", i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.user_id = $1',
+            [user_id]
+        );
         res.json(rows || []);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-app.post('/api/user/inventory/sell', async (req, res) => {
+app.post('/api/user/inventory/delete', async (req, res) => {
     const { user_id, unique_id } = req.body;
     if (!user_id || !unique_id) {
-        return res.status(400).json({ error: 'Неверные данные для продажи' });
+        return res.status(400).json({ error: 'Неверные данные' });
     }
-    const client = await pgPool.connect();
     try {
-        await client.query('BEGIN');
-        const itemResult = await client.query(
-            'SELECT i.value FROM user_inventory ui JOIN items i ON ui.item_id = i.id WHERE ui.id = $1 AND ui.user_id = $2',
-            [unique_id, user_id]
-        );
-        if (itemResult.rows.length === 0) {
-            throw new Error('Предмет не найден в инвентаре');
+        const result = await pgPool.query("DELETE FROM user_inventory WHERE id = $1 AND user_id = $2", [unique_id, user_id]);
+        if (result.rowCount === 0) {
+            throw new Error('Предмет не найден или не принадлежит пользователю');
         }
-        const itemValue = itemResult.rows[0].value;
-
-        await client.query("DELETE FROM user_inventory WHERE id = $1", [unique_id]);
-        const updateResult = await client.query("UPDATE users SET balance_uah = balance_uah + $1 WHERE user_id = $2 RETURNING balance_uah", [itemValue, user_id]);
-
-        await client.query('COMMIT');
-        
-        res.json({ success: true, newBalance: parseFloat(updateResult.rows[0].balance_uah) });
-
+        res.json({ success: true });
     } catch (err) {
-        await client.query('ROLLBACK');
         res.status(500).json({ error: err.message });
-    } finally {
-        client.release();
     }
 });
 
 app.get('/api/case/items_full', async (req, res) => {
     try {
-        const sql = `
-            SELECT i.id, i.name, i."imageSrc", i.value
-            FROM items i
-            JOIN case_items ci ON i.id = ci.item_id
-            WHERE ci.case_id = 1
-        `;
-        const { rows } = await pgPool.query(sql);
+        const { rows } = await pgPool.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
         res.json(rows.length > 0 ? rows : []);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-app.post('/api/case/open', async (req, res) => {
+app.post('/api/case/get-winnings', async (req, res) => {
     const { user_id, quantity } = req.body;
-    const casePrice = 100;
-    const totalCost = casePrice * (quantity || 1);
-
-    if (!user_id || !quantity || quantity < 1) {
-        return res.status(400).json({ error: 'Неверные данные для открытия кейса' });
+    if (!user_id || !quantity) {
+        return res.status(400).json({ error: 'Неверные данные' });
     }
-
     const client = await pgPool.connect();
     try {
         await client.query('BEGIN');
-
-        const userResult = await client.query("SELECT user_id, balance_uah FROM users WHERE user_id = $1 FOR UPDATE", [user_id]);
-        if (userResult.rows.length === 0) throw new Error('Пользователь не найден');
-        const user = userResult.rows[0];
-
-        if (parseFloat(user.balance_uah) < totalCost) throw new Error('Недостаточно средств');
-
         const caseItemsResult = await client.query('SELECT i.id, i.name, i."imageSrc", i.value FROM items i JOIN case_items ci ON i.id = ci.item_id WHERE ci.case_id = 1');
         if (caseItemsResult.rows.length === 0) throw new Error('Кейс пуст');
         const caseItems = caseItemsResult.rows;
-
-        const newBalance = parseFloat(user.balance_uah) - totalCost;
+        
         const wonItems = Array.from({ length: quantity }, () => caseItems[Math.floor(Math.random() * caseItems.length)]);
 
-        await client.query("UPDATE users SET balance_uah = $1 WHERE user_id = $2", [newBalance, user.user_id]);
-
         for (const item of wonItems) {
-            await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [user.user_id, item.id]);
+            await client.query("INSERT INTO user_inventory (user_id, item_id) VALUES ($1, $2)", [user_id, item.id]);
         }
-
         await client.query('COMMIT');
-        res.json({ success: true, newBalance, wonItems });
-
+        res.json({ success: true, wonItems });
     } catch (err) {
         await client.query('ROLLBACK');
         res.status(500).json({ error: err.message });
@@ -273,6 +226,7 @@ app.post('/api/case/open', async (req, res) => {
         client.release();
     }
 });
+
 
 app.get('/api/game_settings', async (req, res) => {
     try {
@@ -286,22 +240,15 @@ app.get('/api/game_settings', async (req, res) => {
 
 app.get('/api/contest/current', async (req, res) => {
     const now = Date.now();
-    const sql = `
-        SELECT c.id, c.end_time, c.ticket_price, c.winner_id, i.name AS "itemName", i."imageSrc" AS "itemImageSrc"
-        FROM contests c
-        JOIN items i ON c.item_id = i.id
-        WHERE c.is_active = TRUE AND c.end_time > $1
-        ORDER BY c.id DESC LIMIT 1
-    `;
     try {
-        const contestResult = await pgPool.query(sql, [now]);
+        const contestResult = await pgPool.query(
+            'SELECT c.id, c.end_time, c.ticket_price, i.name AS "itemName", i."imageSrc" AS "itemImageSrc" FROM contests c JOIN items i ON c.item_id = i.id WHERE c.is_active = TRUE AND c.end_time > $1 ORDER BY c.id DESC LIMIT 1',
+            [now]
+        );
         if (contestResult.rows.length === 0) return res.json(null);
 
         const contest = contestResult.rows[0];
-
         const ticketCountResult = await pgPool.query("SELECT COUNT(*) AS count, COUNT(DISTINCT user_id) as participants FROM user_tickets WHERE contest_id = $1", [contest.id]);
-        const ticketCount = ticketCountResult.rows[0];
-
         const { telegram_id } = req.query;
         let userTickets = 0;
         if (telegram_id) {
@@ -309,31 +256,25 @@ app.get('/api/contest/current', async (req, res) => {
             userTickets = Number(userTicketsResult.rows[0].count);
         }
 
-        res.json({ ...contest, ...ticketCount, userTickets });
-
+        res.json({ ...contest, ...ticketCountResult.rows[0], userTickets });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
 
-
 app.post('/api/contest/buy-ticket', async (req, res) => {
     const { contest_id, telegram_id, quantity } = req.body;
     if (!contest_id || !telegram_id || !quantity || quantity < 1) {
-        return res.status(400).json({ error: 'Неверные данные для покупки билета' });
+        return res.status(400).json({ error: 'Неверные данные' });
     }
-
     const client = await pgPool.connect();
     try {
         await client.query('BEGIN');
-        
         for (let i = 0; i < quantity; i++) {
             await client.query("INSERT INTO user_tickets (contest_id, user_id, telegram_id) VALUES ($1, $2, $3)", [contest_id, telegram_id, telegram_id]);
         }
-
         await client.query('COMMIT');
         res.json({ success: true });
-
     } catch (err) {
         await client.query('ROLLBACK');
         res.status(500).json({ error: err.message });
