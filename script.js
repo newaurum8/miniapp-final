@@ -36,6 +36,9 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- ОБЪЕКТ С ЭЛЕМЕНТАМИ DOM ---
     const UI = {};
 
+    // !!! ВАЖНО: Этот ключ должен быть таким же, как MINI_APP_SECRET_KEY в webhook_handler.py !!!
+    const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
+
     // --- ФУНКЦИИ ---
 
     function showNotification(message) {
@@ -68,30 +71,43 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ========== ОБНОВЛЕННАЯ ФУНКЦИЯ ==========
+    // ========== ПОЛНОСТЬЮ ПЕРЕРАБОТАННАЯ ФУНКЦИЯ СИНХРОНИЗАЦИИ ==========
     async function updateBalanceOnServer(delta, reason) {
         if (!STATE.user || !STATE.user.telegram_id) {
-            console.error("Пользователь не авторизован для обновления баланса на сервере.");
+            console.error("updateBalanceOnServer FAILED: User object or user.telegram_id is missing.", STATE.user);
+            showNotification('Ошибка: Пользователь не авторизован.');
             return false;
         }
 
         try {
-            const bodyPayload = {
+            const requestBody = {
                 user_id: STATE.user.telegram_id, 
                 delta: delta,
-                reason: reason || "game_action" 
+                reason: reason || "mini_app_action" 
             };
+            const requestBodyString = JSON.stringify(requestBody);
+
+            // 1. Создаем подпись HMAC
+            const signature = CryptoJS.HmacSHA256(requestBodyString, MINI_APP_SECRET_KEY).toString(CryptoJS.enc.Hex);
+            
+            // 2. Создаем ключ идемпотентности, чтобы избежать двойных списаний
+            const idempotencyKey = `${STATE.user.telegram_id}-${Date.now()}`;
 
             const response = await fetch('/api/v1/balance/change', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(bodyPayload)
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Signature': signature, // <-- Отправляем подпись
+                    'X-Idempotency-Key': idempotencyKey // <-- Отправляем ключ
+                },
+                body: requestBodyString
             });
             
             const result = await response.json();
 
             if (!response.ok) {
-                throw new Error(result.detail || 'Не удалось обновить баланс на сервере.');
+                console.error("Server responded with an error:", result);
+                throw new Error(result.detail || 'Не удалось обновить баланс.');
             }
 
             STATE.userBalance = result.new_balance;
@@ -107,7 +123,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return false;
         }
     }
-    // =======================================
+    // =======================================================================
 
 
     async function loadInventory() {
@@ -428,7 +444,6 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // ========== ОБНОВЛЕННАЯ ФУНКЦИЯ ==========
     function showResult() {
         UI.resultModal.innerHTML = '';
         const totalValue = STATE.lastWonItems.reduce((sum, item) => sum + item.value, 0);
@@ -441,7 +456,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="inventory-item">
                     <img src="${item.imageSrc}" alt="${item.name}">
                     <div class="inventory-item-name">${item.name}</div>
-                    <div class="inventory-item-price">⭐ ${item.value.toLocaleString('ru-RU')}</div>
+                    <div class="inventory-item-price">⭐ ${totalValue > 0 ? item.value.toLocaleString('ru-RU') : ''}</div>
                 </div>`).join('')}
             </div>
             <div class="result-buttons">
@@ -450,28 +465,36 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>`;
         UI.resultModal.appendChild(modalContent);
 
-        const finalizeAction = async () => {
+        const finalizeAction = async (inventoryNeedsReload) => {
             hideModal(UI.resultModal);
             UI.spinView.classList.add('hidden');
             UI.caseView.classList.remove('hidden');
             STATE.isSpinning = false;
-            await loadInventory();
+            if (inventoryNeedsReload) {
+                await loadInventory();
+            }
         };
 
-        modalContent.querySelector('.close-btn').addEventListener('click', finalizeAction);
+        modalContent.querySelector('.close-btn').addEventListener('click', () => finalizeAction(true));
         modalContent.querySelector('#result-spin-again-btn').addEventListener('click', () => {
-            finalizeAction();
+            finalizeAction(true);
             setTimeout(handleCaseClick, 100);
         });
         
-        // --- ИЗМЕНЕНИЕ: Заменена локальная логика на вызов серверной функции ---
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async () => {
+            const sellBtn = modalContent.querySelector('#result-sell-btn');
+            sellBtn.disabled = true;
+            sellBtn.textContent = 'Продажа...';
+
             const success = await updateBalanceOnServer(totalValue, `Продажа ${STATE.lastWonItems.length} предметов из кейса`);
+            
             if (success) {
                 showNotification('Предметы проданы!');
-                await finalizeAction();
+                await finalizeAction(false);
             } else {
                 showNotification('Ошибка при продаже предметов.');
+                sellBtn.disabled = false;
+                sellBtn.innerHTML = `Продать все за ⭐ ${totalValue.toLocaleString('ru-RU')}`;
             }
         });
         showModal(UI.resultModal);
