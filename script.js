@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // --- ЕДИНЫЙ URL ДЛЯ ВСЕХ ЗАПРОСОВ ---
     // !!! ВАЖНОЕ ИЗМЕНЕНИЕ !!!
     // Укажите здесь публичный адрес вашего Python-сервера (где запущен webhook_handler.py)
-    const API_BASE_URL = 'http://server4644.server-vps.com:8000';
+    const API_BASE_URL = '';
     const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
 
     // --- ФУНКЦИИ ---
@@ -1242,3 +1242,4 @@ document.addEventListener('DOMContentLoaded', function() {
         document.body.innerHTML = `<div style="color: white; padding: 20px;">Произошла критическая ошибка: ${error.message}. Пожалуйста, проверьте консоль (F12).</div>`;
     }
 });
+
