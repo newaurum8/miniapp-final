@@ -1,6 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // Используем относительный URL
-    const API_BASE_URL = '';
+    // ИСПРАВЛЕНО: URL-адрес бэкенда теперь относительный к корневой папке
+    const API_BASE_URL = '..';
 
     const params = new URLSearchParams(window.location.search);
     const ADMIN_SECRET_KEY = params.get('secret');
