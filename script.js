@@ -114,7 +114,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const user = tg.initDataUnsafe.user;
             if (user && user.id) {
                 if (UI.profilePhoto) UI.profilePhoto.src = user.photo_url || '';
-                if (UI.profileName) UI.profileName.textContent = `${user.first_name || ''} ${tgUser.last_name || ''}`.trim();
+                if (UI.profileName) UI.profileName.textContent = `${user.first_name || ''} ${user.last_name || ''}`.trim();
                 if (UI.profileId) UI.profileId.textContent = `ID ${user.id}`;
                 authenticateUser(user);
             } else {
@@ -608,8 +608,7 @@ document.addEventListener('DOMContentLoaded', function() {
             UI.rpsResultMessage.textContent = '';
             const computerChoice = STATE.rpsState.choices[Math.floor(Math.random() * 3)];
             
-            // ... (анимация)
-            // ...
+            // ... (анимация) ...
             
             // В колбеке после анимации:
             let resultMessage = '';
@@ -680,8 +679,7 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
-    
-    // --- INIT ---
+
     function init() {
         // --- ИСПРАВЛЕННАЯ ЛОГИКА ВЫБОРА ЭЛЕМЕНТОВ ---
         const selectors = {
@@ -748,7 +746,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (UI.ticketQuantityMinus) UI.ticketQuantityMinus.addEventListener('click', () => handleTicketQuantityChange(-1));
         if (UI.profileTabs) UI.profileTabs.forEach(tab => tab.addEventListener('click', function () {
             UI.profileTabs.forEach(t => t.classList.remove('active'));
-            UI.profileContents.forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.profile-tab-content').forEach(c => c.classList.remove('active'));
             this.classList.add('active');
             const content = document.getElementById(this.dataset.tab + '-content');
             if(content) content.classList.add('active');
