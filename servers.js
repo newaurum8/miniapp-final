@@ -9,8 +9,8 @@ const fetch = require('node-fetch');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Используем переменную окружения для строки подключения
-const connectionString = 'postgresql://neondb_owner:npg_gFvZxTR7qdw1@ep-round-sound-agieqqp0-pooler.c-2.eu-central-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+// !!! ИСПРАВЛЕНИЕ: Установлена правильная строка подключения к вашей базе данных NeonDB !!!
+const connectionString = 'postgresql://neondb_owner:npg_gFvZxTR7qdw1@ep-round-sound-agieqqp0-pooler.c-2.eu-central-1.aws.neon.tech/neondb?sslmode=require';
 
 if (!connectionString) {
     console.error('Ошибка: Переменная окружения DATABASE_URL не установлена!');
@@ -20,7 +20,7 @@ if (!connectionString) {
 const pool = new Pool({
     connectionString: connectionString,
     ssl: {
-        rejectUnauthorized: false // Важная настройка для Render и Supabase
+        rejectUnauthorized: false
     }
 });
 
@@ -29,15 +29,14 @@ app.use(express.json());
 
 // --- КОНФИГУРАЦИЯ ---
 const ADMIN_SECRET = 'Aurum';
-// !!! ИСПРАВЛЕНИЕ: Установлен ваш публичный URL-адрес Python-сервера !!!
 const BOT_API_URL = 'http://server4644.server-vps.com:8001/api/v1/balance/change'; 
-const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY"; // Ваш секретный ключ
+const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
 
 // --- Хелпер для отправки запросов к API бота ---
 async function changeBalanceInBot(telegramId, delta, reason) {
     const idempotencyKey = uuidv4();
     const body = JSON.stringify({
-        user_id: telegramId, // Отправляем telegram_id
+        user_id: telegramId,
         delta: delta,
         reason: reason
     });
@@ -47,7 +46,6 @@ async function changeBalanceInBot(telegramId, delta, reason) {
         .update(body)
         .digest('hex');
 
-    // Логика повторных попыток для сетевых ошибок
     for (let attempt = 1; attempt <= 3; attempt++) {
         try {
             const response = await fetch(BOT_API_URL, {
@@ -58,19 +56,18 @@ async function changeBalanceInBot(telegramId, delta, reason) {
                     'X-Signature': signature
                 },
                 body: body,
-                timeout: 7000 // таймаут 7 секунд
+                timeout: 7000
             });
 
             const result = await response.json();
 
             if (!response.ok) {
-                 // Не повторяем попытку при ошибках клиента (4xx)
                 if (response.status >= 400 && response.status < 500) {
                      throw new Error(result.detail || `Ошибка API бота: ${response.status}`);
                 }
                  console.warn(`Попытка ${attempt} не удалась. Статус: ${response.status}. Ответ:`, result);
                  if (attempt === 3) throw new Error(`Ошибка API бота после 3 попыток: ${result.detail || response.status}`);
-                 await new Promise(res => setTimeout(res, 1000 * attempt)); // экспоненциальная задержка
+                 await new Promise(res => setTimeout(res, 1000 * attempt));
                  continue;
             }
 
@@ -585,4 +582,3 @@ app.listen(port, () => {
     console.log(`Админ-панель: http://localhost:${port}/admin?secret=${ADMIN_SECRET}`);
     initializeDb();
 });
-
