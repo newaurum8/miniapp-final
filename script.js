@@ -1,10 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // ИСПРАВЛЕНО: URL-адрес бэкенда теперь относительный
-    const API_BASE_URL = '';
-
     // --- ГЛОБАЛЬНЫЙ СТАТУС ---
     const STATE = {
-        user: null,
+        user: null, 
         userBalance: 0,
         inventory: [],
         gameHistory: [],
@@ -47,10 +44,37 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.notificationToast.classList.add('visible');
         setTimeout(() => UI.notificationToast.classList.remove('visible'), 3000);
     }
+    
+    // --- НОВАЯ ФУНКЦИЯ для вызова API бэкенда мини-приложения ---
+    async function callApi(endpoint, method = 'GET', body = null) {
+        try {
+            const options = {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            };
+            if (body && STATE.user) {
+                // Добавляем user_id (внутренний ID) во все POST запросы
+                body.user_id = STATE.user.id;
+                options.body = JSON.stringify(body);
+            }
+            const response = await fetch(endpoint, options);
+            const result = await response.json();
+            if (!response.ok) {
+                throw new Error(result.error || 'Ошибка сервера');
+            }
+            return result;
+        } catch (error) {
+            showNotification(error.message);
+            throw error;
+        }
+    }
+
 
     async function authenticateUser(tgUser) {
         try {
-            const response = await fetch(`${API_BASE_URL}/api/user/get-or-create`, {
+            const response = await fetch('/api/user/get-or-create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -63,22 +87,20 @@ document.addEventListener('DOMContentLoaded', function() {
             STATE.user = userData;
             STATE.userBalance = userData.balance;
             updateBalanceDisplay();
-            await loadInventory();
+            await loadInventory(); 
             loadContestData();
         } catch (error) {
             console.error("Ошибка аутентификации:", error);
             showNotification('Не удалось подключиться к серверу.');
         }
     }
-
+    
     async function loadInventory() {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const response = await fetch(`${API_BASE_URL}/api/user/inventory?user_id=${STATE.user.id}`);
-            if (!response.ok) throw new Error('Could not fetch inventory');
-            const inventoryData = await response.json();
+            const inventoryData = await callApi(`/api/user/inventory?user_id=${STATE.user.id}`);
             STATE.inventory = inventoryData;
-            renderInventory();
+            renderInventory(); 
         } catch (error) {
             console.error("Ошибка загрузки инвентаря:", error);
         }
@@ -93,7 +115,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const user = tg.initDataUnsafe.user;
             if (user && user.id) {
                 if (UI.profilePhoto) UI.profilePhoto.src = user.photo_url || '';
-                if (UI.profileName) UI.profileName.textContent = `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim();
+                if (UI.profileName) UI.profileName.textContent = `${user.first_name || ''} ${user.last_name || ''}`.trim();
                 if (UI.profileId) UI.profileId.textContent = `ID ${user.id}`;
                 authenticateUser(user);
             } else {
@@ -114,7 +136,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const tg = window.Telegram.WebApp;
             const user = tg.initDataUnsafe.user;
-            const app_url = `https://t.me/qqtest134_bot/website?startapp=${user.id}`;
+            const app_url = `https://t.me/YOUR_BOT_USERNAME_HERE/YOUR_APP_NAME?startapp=${user.id}`;
             const text = `Привет! Присоединяйся к StarsDrop и получай крутые подарки!`;
             tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(app_url)}&text=${encodeURIComponent(text)}`);
         } catch(e) {
@@ -127,7 +149,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const tg = window.Telegram.WebApp;
             const user = tg.initDataUnsafe.user;
-            const app_url = `https://t.me/qqtest134_bot/website?startapp=${user.id}`;
+            const app_url = `https://t.me/YOUR_BOT_USERNAME_HERE/YOUR_APP_NAME?startapp=${user.id}`;
             navigator.clipboard.writeText(app_url).then(() => {
                 showNotification('Ссылка скопирована!');
             }).catch(err => {
@@ -181,7 +203,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (btnToActivate) btnToActivate.classList.add('active');
-
+        
         const tg = window.Telegram?.WebApp;
         if (tg) {
             if (tg.BackButton.isVisible) tg.BackButton.offClick();
@@ -195,9 +217,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 tg.BackButton.hide();
             }
         }
-
+        
         if (viewId === 'profile-view') {
-            loadInventory();
+            loadInventory(); 
             renderHistory();
         }
         if (viewId === 'upgrade-view') resetUpgradeState(true);
@@ -223,22 +245,18 @@ document.addEventListener('DOMContentLoaded', function() {
                     Продать за <span class="icon">⭐</span> ${item.value.toLocaleString('ru-RU')}
                 </button>
             `;
-            itemEl.querySelector('.inventory-sell-btn').addEventListener('click', () => sellFromInventory(item)); // Передаем весь объект
+            itemEl.querySelector('.inventory-sell-btn').addEventListener('click', () => sellFromInventory(item.uniqueId));
             UI.inventoryContent.appendChild(itemEl);
         });
     }
 
-    async function sellFromInventory(itemToSell) {
+    async function sellFromInventory(uniqueId) {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const response = await fetch(`${API_BASE_URL}/api/user/inventory/sell`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: STATE.user.id, unique_id: itemToSell.uniqueId })
+            const result = await callApi('/api/user/inventory/sell', 'POST', { 
+                unique_id: uniqueId 
             });
-            const result = await response.json();
-            if (!result.success) throw new Error(result.error || 'Server error');
-
+            
             STATE.userBalance = result.newBalance;
             updateBalanceDisplay();
             await loadInventory();
@@ -246,10 +264,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
         } catch (error) {
             console.error("Ошибка при продаже предмета:", error);
-            showNotification('Не удалось продать предмет.');
         }
     }
-
 
     function renderHistory() {
         if (!UI.historyContent) return;
@@ -306,24 +322,23 @@ document.addEventListener('DOMContentLoaded', function() {
     async function startSpinProcess() {
         if (STATE.isSpinning || !STATE.user) return;
         const totalCost = STATE.casePrice * STATE.openQuantity;
-        if (STATE.userBalance < totalCost) return showNotification("Недостаточно средств.");
+        if (STATE.userBalance < totalCost) {
+            updatePriceMessage(); // Обновляем сообщение об ошибке
+            return showNotification("Недостаточно средств.");
+        }
 
         try {
-            const response = await fetch(`${API_BASE_URL}/api/case/open`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user_id: STATE.user.id, quantity: STATE.openQuantity })
+            const result = await callApi('/api/case/open', 'POST', {
+                quantity: STATE.openQuantity
             });
-            const result = await response.json();
-            if (!result.success) throw new Error(result.error);
-
+            
             STATE.isSpinning = true;
-            STATE.userBalance = result.newBalance;
+            STATE.userBalance = result.newBalance; 
             updateBalanceDisplay();
             hideModal(UI.preOpenModal);
 
             STATE.lastWonItems = result.wonItems;
-
+            
             STATE.gameHistory.push(...result.wonItems.map(item => ({ ...item, date: new Date(), name: `Выигрыш из кейса` })));
 
             UI.caseView.classList.add('hidden');
@@ -337,7 +352,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         } catch(error) {
             console.error("Ошибка открытия кейса:", error);
-            showNotification(error.message || "Не удалось открыть кейс");
+            STATE.isSpinning = false;
         }
     }
 
@@ -348,7 +363,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const reelLength = 60, winnerIndex = 50;
         const reel = Array.from({ length: reelLength }, (_, i) => i === winnerIndex ? winnerItem : STATE.possibleItems[Math.floor(Math.random() * STATE.possibleItems.length)]);
         UI.rouletteTrack.innerHTML = reel.map(item => `<div class="roulette-item"><img src="${item.imageSrc}" alt="${item.name}"></div>`).join('');
-        const itemWidth = 130;
+        const itemWidth = 130; // 120 width + 5*2 margin
         const targetPosition = (winnerIndex * itemWidth) + (itemWidth / 2);
         const animationDuration = STATE.isFastSpinEnabled ? '0.2s' : '6s';
         UI.rouletteTrack.style.transition = 'none';
@@ -376,7 +391,7 @@ document.addEventListener('DOMContentLoaded', function() {
             track.innerHTML = reel.map(item => `<div class="vertical-roulette-item"><img src="${item.imageSrc}" alt="${item.name}"></div>`).join('');
             spinnerColumn.appendChild(track);
             UI.multiSpinnerContainer.appendChild(spinnerColumn);
-            const itemHeight = 110;
+            const itemHeight = 110; // 100 height + 5*2 margin
             const targetPosition = (winnerIndex * itemHeight) + (itemHeight / 2);
             track.style.transition = 'none';
             track.style.top = '0px';
@@ -410,13 +425,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 <button class="primary-button" id="result-spin-again-btn">Крутить еще</button>
             </div>`;
         UI.resultModal.appendChild(modalContent);
-
+        
         const finalizeAction = async () => {
             hideModal(UI.resultModal);
             UI.spinView.classList.add('hidden');
             UI.caseView.classList.remove('hidden');
             STATE.isSpinning = false;
-            await loadInventory();
+            await loadInventory(); 
         };
 
         modalContent.querySelector('.close-btn').addEventListener('click', finalizeAction);
@@ -425,9 +440,9 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(handleCaseClick, 100);
         });
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async () => {
-            STATE.userBalance += totalValue;
-            updateBalanceDisplay();
-            showNotification('Предметы проданы!');
+            // Эта логика может быть неточной, т.к. uniqueId присваивается базой.
+            // Продажа по одному предмету через sellFromInventory надежнее.
+            showNotification('Продажа... (эта функция может быть неточной)');
             await finalizeAction();
         });
         showModal(UI.resultModal);
@@ -447,7 +462,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadContestData() {
         if (!STATE.user || !STATE.user.telegram_id) return;
         try {
-            const response = await fetch(`${API_BASE_URL}/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
+            const response = await fetch(`/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
             if (!response.ok) throw new Error('Network error');
             STATE.contest = await response.json();
             updateContestUI();
@@ -455,7 +470,7 @@ document.addEventListener('DOMContentLoaded', function() {
             console.error("Не удалось загрузить данные о конкурсе:", error);
         }
     }
-
+    
     function updateContestUI() {
         if (!UI.buyTicketBtn) return;
         if (!STATE.contest) {
@@ -484,28 +499,20 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!STATE.contest || !STATE.user) return showNotification('Ошибка: данные не загружены.');
         const totalCost = STATE.contest.ticket_price * STATE.ticketQuantity;
         if (STATE.userBalance < totalCost) return showNotification('Недостаточно средств.');
-
+        
         try {
-            const response = await fetch(`${API_BASE_URL}/api/contest/buy-ticket`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contest_id: STATE.contest.id,
-                    telegram_id: STATE.user.telegram_id,
-                    quantity: STATE.ticketQuantity
-                })
+            const result = await callApi('/api/contest/buy-ticket', 'POST', {
+                contest_id: STATE.contest.id,
+                telegram_id: STATE.user.telegram_id,
+                quantity: STATE.ticketQuantity
             });
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error);
-            }
+
             STATE.userBalance = result.newBalance;
             updateBalanceDisplay();
             showNotification(`Вы успешно приобрели ${STATE.ticketQuantity} билет(ов)!`);
             await loadContestData();
         } catch (error) {
             console.error("Ошибка при покупке билета:", error);
-            showNotification(error.message);
         }
     }
 
@@ -522,6 +529,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const d = Math.floor(timeLeft / 86400000), h = Math.floor((timeLeft % 86400000) / 3600000), m = Math.floor((timeLeft % 3600000) / 60000), s = Math.floor((timeLeft % 60000) / 1000);
         UI.contestTimer.textContent = `${d}д ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} 🕔`;
     }
+    
+    // --- ОСТАЛЬНЫЕ ИГРОВЫЕ ФУНКЦИИ ---
 
     function resetUpgradeState(resetRotation = false) {
         if (!UI.upgradePointer) return;
@@ -614,10 +623,8 @@ document.addEventListener('DOMContentLoaded', function() {
     async function handleUpgradeClick() {
         const { yourItem, desiredItem, chance, isUpgrading } = STATE.upgradeState;
         if (!yourItem || !desiredItem || isUpgrading) return;
-
         STATE.upgradeState.isUpgrading = true;
         UI.performUpgradeBtn.disabled = true;
-
         const isSuccess = (Math.random() * 100) < chance;
         const chanceAngle = (chance / 100) * 360;
         const randomOffset = Math.random() * 0.9 + 0.05;
@@ -630,15 +637,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
         UI.upgradePointer.addEventListener('transitionend', () => {
             setTimeout(async () => {
+                const itemIndex = STATE.inventory.findIndex(invItem => invItem.uniqueId === yourItem.uniqueId);
+                if (itemIndex > -1) STATE.inventory.splice(itemIndex, 1);
                 if (isSuccess) {
                     showNotification(`Апгрейд успешный! Вы получили ${desiredItem.name}.`);
-                    STATE.gameHistory.push({ ...desiredItem, date: new Date(), name: `Апгрейд до ${desiredItem.name}`, value: desiredItem.value });
+                    const newItem = { ...desiredItem, uniqueId: Date.now() };
+                    STATE.inventory.push(newItem);
+                    STATE.gameHistory.push({ ...newItem, date: new Date(), name: `Апгрейд до ${newItem.name}`, value: newItem.value });
                 } else {
                     showNotification(`К сожалению, апгрейд не удался. Предмет потерян.`);
                     STATE.gameHistory.push({ ...yourItem, date: new Date(), name: `Неудачный апгрейд ${yourItem.name}`, value: -yourItem.value });
                 }
                 resetUpgradeState(true);
-                await loadInventory();
+                await loadInventory(); // Перезагружаем инвентарь с сервера
                 renderHistory();
             }, 1500);
         }, { once: true });
@@ -856,7 +867,7 @@ document.addEventListener('DOMContentLoaded', function() {
         UI.towerMaxWinDisplay.textContent = `Возможный выигрыш: ${maxWin.toLocaleString('ru-RU')} ⭐`;
         renderTower();
     }
-
+    
     function renderTower() {
         if (!UI.towerGameBoard) return;
         UI.towerGameBoard.innerHTML = '';
@@ -945,7 +956,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (STATE.towerState.currentLevel === 0 || STATE.towerState.isCashingOut) return;
         if (STATE.towerState.nextLevelTimeout) clearTimeout(STATE.towerState.nextLevelTimeout);
         STATE.towerState.isCashingOut = true;
-        STATE.towerState.isActive = false;
+        STATE.towerState.isActive = false; 
         UI.towerCashoutBtn.disabled = true;
         endTowerGame(true);
     }
@@ -962,8 +973,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const result = Math.random() < 0.5 ? 'heads' : 'tails';
         UI.coin.addEventListener('transitionend', () => {
             if (playerChoice === result) {
-                const winAmount = bet * 2;
-                STATE.userBalance += winAmount;
+                STATE.userBalance += bet * 2;
                 UI.coinflipResult.textContent = `Вы выиграли ${bet} ⭐!`;
                 showNotification(`Победа!`);
             } else {
@@ -997,23 +1007,19 @@ document.addEventListener('DOMContentLoaded', function() {
         const targetPosition = (winnerIndex * 130) + 65;
         UI.rpsComputerChoice.addEventListener('transitionend', () => {
             let resultMessage = '';
-            let balanceChange = -bet; // По умолчанию проигрыш
             if (playerChoice === computerChoice) {
                 resultMessage = "Ничья!";
-                balanceChange = 0; // Возвращаем ставку
             } else if ((playerChoice === 'rock' && computerChoice === 'scissors') || (playerChoice === 'paper' && computerChoice === 'rock') || (playerChoice === 'scissors' && computerChoice === 'paper')) {
                 resultMessage = `Вы выиграли ${bet} ⭐!`;
-                balanceChange = bet; // Чистый выигрыш
+                STATE.userBalance += bet;
                 showNotification(`Победа!`);
             } else {
                 resultMessage = `Вы проиграли ${bet} ⭐.`;
+                STATE.userBalance -= bet;
                 showNotification(`Проигрыш!`);
             }
-
-            STATE.userBalance += balanceChange + (playerChoice === computerChoice ? bet : 0); // Обновляем баланс
-            updateBalanceDisplay();
             UI.rpsResultMessage.textContent = resultMessage;
-
+            updateBalanceDisplay();
             setTimeout(() => {
                 STATE.rpsState.isPlaying = false;
                 UI.rpsButtons.forEach(button => button.disabled = false);
@@ -1028,7 +1034,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadInitialData() {
         try {
-            const [caseResponse, settingsResponse] = await Promise.all([ fetch(`${API_BASE_URL}/api/case/items_full`), fetch(`${API_BASE_URL}/api/game_settings`) ]);
+            const [caseResponse, settingsResponse] = await Promise.all([ fetch('/api/case/items_full'), fetch('/api/game_settings') ]);
             if (!caseResponse.ok) throw new Error(`Ошибка загрузки кейсов: ${caseResponse.status}`);
             if (!settingsResponse.ok) throw new Error(`Ошибка загрузки настроек: ${settingsResponse.status}`);
             STATE.possibleItems = await caseResponse.json();
@@ -1160,7 +1166,7 @@ document.addEventListener('DOMContentLoaded', function() {
         switchView('game-view');
         setInterval(updateTimer, 1000);
     }
-
+    
     try {
         init();
     } catch (error) {
