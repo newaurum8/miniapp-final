@@ -30,7 +30,7 @@ app.use(express.json());
 // --- КОНФИГУРАЦИЯ ---
 const ADMIN_SECRET = 'Aurum';
 // !!! ИСПРАВЛЕНИЕ: Установлен ваш публичный URL-адрес Python-сервера !!!
-const BOT_API_URL = 'http://server4644.server-vps.com:8000/api/v1/balance/change'; 
+const BOT_API_URL = 'http://server4644.server-vps.com:8001/api/v1/balance/change'; 
 const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY"; // Ваш секретный ключ
 
 // --- Хелпер для отправки запросов к API бота ---
