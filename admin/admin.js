@@ -1,6 +1,7 @@
+// admin/admin.js (Исправленная версия)
 document.addEventListener('DOMContentLoaded', () => {
-    // ИСПРАВЛЕНО: URL-адрес бэкенда теперь относительный к корневой папке
-    const API_BASE_URL = '..';
+    // 🚀 ИСПРАВЛЕНО: URL-адрес теперь абсолютный, что гораздо надёжнее
+    const API_BASE_URL = '';
 
     const params = new URLSearchParams(window.location.search);
     const ADMIN_SECRET_KEY = params.get('secret');
@@ -65,7 +66,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
     
-    // ИЗМЕНЕННАЯ ФУНКЦИЯ
     function renderUsers(users) {
         usersTableBody.innerHTML = '';
         if (!users || users.length === 0) {
@@ -85,7 +85,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // ИЗМЕНЕННАЯ ФУНКЦИЯ
     async function updateUserBalance(userId, newBalance) {
         try {
             const response = await fetch(`${API_BASE_URL}/api/admin/user/${userId}/balance?secret=${ADMIN_SECRET_KEY}`, {
@@ -107,7 +106,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // ИЗМЕНЕННЫЙ ОБРАБОТЧИК
     usersTableBody.addEventListener('click', (e) => {
         if (e.target.classList.contains('save-balance-btn')) {
             const userId = e.target.dataset.userid;
@@ -129,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
             label.className = 'item-label';
             label.innerHTML = `
                 <input type="checkbox" data-itemid="${item.id}" ${isChecked ? 'checked' : ''}>
-                <img src="../${item.imageSrc}" alt="${item.name}">
+                <img src="${API_BASE_URL}/${item.imageSrc}" alt="${item.name}">
                 <span>${item.name}</span>
             `;
             caseItemsContainer.appendChild(label);
