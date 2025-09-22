@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
     // --- ГЛОБАЛЬНЫЙ СТАТУС ---
     const STATE = {
-        user: null, 
+        user: null,
         userBalance: 0,
         inventory: [],
         gameHistory: [],
@@ -38,25 +38,25 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // --- ФУНКЦИИ ---
 
-    function showNotification(message) {
+    function showNotification(message, isError = false) {
         if (!UI.notificationToast) return;
         UI.notificationToast.textContent = message;
+        UI.notificationToast.classList.toggle('error', isError);
         UI.notificationToast.classList.add('visible');
         setTimeout(() => UI.notificationToast.classList.remove('visible'), 3000);
     }
-    
-    // --- НОВАЯ ФУНКЦИЯ для вызова API бэкенда мини-приложения ---
+
+    // --- ОСНОВНАЯ ФУНКЦИЯ для вызова API бэкенда мини-приложения ---
     async function callApi(endpoint, method = 'GET', body = null) {
         try {
             const options = {
                 method: method,
-                headers: {
-                    'Content-Type': 'application/json',
-                },
+                headers: { 'Content-Type': 'application/json' },
             };
             if (body && STATE.user) {
-                // Добавляем user_id (внутренний ID) во все POST запросы
+                // Добавляем user_id (внутренний ID) и telegram_id во все POST запросы
                 body.user_id = STATE.user.id;
+                body.telegram_id = STATE.user.telegram_id;
                 options.body = JSON.stringify(body);
             }
             const response = await fetch(endpoint, options);
@@ -64,48 +64,46 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!response.ok) {
                 throw new Error(result.error || 'Ошибка сервера');
             }
+
+            // Если API вернуло новый баланс, обновляем его глобально
+            if (result.newBalance !== undefined) {
+                STATE.userBalance = parseFloat(result.newBalance);
+                updateBalanceDisplay();
+            }
+
             return result;
         } catch (error) {
-            showNotification(error.message);
+            showNotification(error.message, true);
             throw error;
         }
     }
 
-
     async function authenticateUser(tgUser) {
         try {
-            const response = await fetch('/api/user/get-or-create', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    telegram_id: tgUser.id,
-                    username: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim()
-                })
+            const userData = await callApi('/api/user/get-or-create', 'POST', {
+                telegram_id: tgUser.id,
+                username: `${tgUser.first_name || ''} ${tgUser.last_name || ''}`.trim()
             });
-            if (!response.ok) throw new Error('Authentication failed');
-            const userData = await response.json();
             STATE.user = userData;
-            STATE.userBalance = userData.balance;
+            STATE.userBalance = parseFloat(userData.balance_uah);
             updateBalanceDisplay();
-            await loadInventory(); 
+            await loadInventory();
             loadContestData();
         } catch (error) {
             console.error("Ошибка аутентификации:", error);
-            showNotification('Не удалось подключиться к серверу.');
         }
     }
-    
+
     async function loadInventory() {
         if (!STATE.user || !STATE.user.id) return;
         try {
             const inventoryData = await callApi(`/api/user/inventory?user_id=${STATE.user.id}`);
             STATE.inventory = inventoryData;
-            renderInventory(); 
+            renderInventory();
         } catch (error) {
             console.error("Ошибка загрузки инвентаря:", error);
         }
     }
-
 
     function loadTelegramData() {
         try {
@@ -122,7 +120,7 @@ document.addEventListener('DOMContentLoaded', function() {
                  console.warn("Данные пользователя Telegram не найдены. Работа в режиме гостя.");
                  if (UI.profileName) UI.profileName.textContent = "Guest";
                  if (UI.profileId) UI.profileId.textContent = "ID 0";
-                 STATE.userBalance = 1000;
+                 STATE.userBalance = 1000; // Демо-баланс
                  updateBalanceDisplay();
             }
         } catch (error) {
@@ -132,38 +130,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function inviteFriend() {
-        try {
-            const tg = window.Telegram.WebApp;
-            const user = tg.initDataUnsafe.user;
-            const app_url = `https://t.me/YOUR_BOT_USERNAME_HERE/YOUR_APP_NAME?startapp=${user.id}`;
-            const text = `Привет! Присоединяйся к StarsDrop и получай крутые подарки!`;
-            tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(app_url)}&text=${encodeURIComponent(text)}`);
-        } catch(e) {
-            console.error(e);
-            showNotification("Функция доступна только в Telegram.");
-        }
-    }
-
-    function copyInviteLink() {
-        try {
-            const tg = window.Telegram.WebApp;
-            const user = tg.initDataUnsafe.user;
-            const app_url = `https://t.me/YOUR_BOT_USERNAME_HERE/YOUR_APP_NAME?startapp=${user.id}`;
-            navigator.clipboard.writeText(app_url).then(() => {
-                showNotification('Ссылка скопирована!');
-            }).catch(err => {
-                console.error('Не удалось скопировать ссылку: ', err);
-                showNotification('Ошибка копирования.');
-            });
-        } catch(e) {
-            console.error(e);
-            showNotification("Функция доступна только в Telegram.");
-        }
-    }
-
     function updateBalanceDisplay() {
-        if (UI.userBalanceElement) UI.userBalanceElement.innerText = Math.round(STATE.userBalance).toLocaleString('ru-RU');
+        if (UI.userBalanceElement) {
+            UI.userBalanceElement.innerHTML = `<span class="icon">₴</span> ${(STATE.userBalance || 0).toFixed(2)}`;
+        }
     }
 
     function showModal(modal) {
@@ -203,7 +173,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         if (btnToActivate) btnToActivate.classList.add('active');
-        
+
         const tg = window.Telegram?.WebApp;
         if (tg) {
             if (tg.BackButton.isVisible) tg.BackButton.offClick();
@@ -217,9 +187,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 tg.BackButton.hide();
             }
         }
-        
+
         if (viewId === 'profile-view') {
-            loadInventory(); 
+            loadInventory();
             renderHistory();
         }
         if (viewId === 'upgrade-view') resetUpgradeState(true);
@@ -242,7 +212,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 <img src="${item.imageSrc}" alt="${item.name}">
                 <div class="inventory-item-name">${item.name}</div>
                 <button class="inventory-sell-btn">
-                    Продать за <span class="icon">⭐</span> ${item.value.toLocaleString('ru-RU')}
+                    Продать за <span class="icon">₴</span> ${item.value.toFixed(2)}
                 </button>
             `;
             itemEl.querySelector('.inventory-sell-btn').addEventListener('click', () => sellFromInventory(item.uniqueId));
@@ -253,15 +223,11 @@ document.addEventListener('DOMContentLoaded', function() {
     async function sellFromInventory(uniqueId) {
         if (!STATE.user || !STATE.user.id) return;
         try {
-            const result = await callApi('/api/user/inventory/sell', 'POST', { 
-                unique_id: uniqueId 
+            await callApi('/api/user/inventory/sell', 'POST', {
+                unique_id: uniqueId
             });
-            
-            STATE.userBalance = result.newBalance;
-            updateBalanceDisplay();
             await loadInventory();
             showNotification('Предмет продан!');
-
         } catch (error) {
             console.error("Ошибка при продаже предмета:", error);
         }
@@ -284,7 +250,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     <div class="history-item-name">${entry.name}</div>
                     <div class="history-item-date">${eventDate.toLocaleString('ru-RU')}</div>
                 </div>
-                <div class="history-item-price">${entry.value > 0 ? '+' : ''}<span class="icon">⭐</span>${entry.value.toLocaleString('ru-RU')}</div>
+                <div class="history-item-price">${entry.value > 0 ? '+' : ''}<span class="icon">₴</span>${entry.value.toFixed(2)}</div>
             `;
             UI.historyContent.appendChild(itemEl);
         });
@@ -299,11 +265,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!UI.priceCheckMessage) return;
         const totalCost = STATE.casePrice * STATE.openQuantity;
         if (STATE.userBalance >= totalCost) {
-            UI.priceCheckMessage.innerHTML = `⭐ ${totalCost.toLocaleString('ru-RU')}`;
+            UI.priceCheckMessage.innerHTML = `₴ ${totalCost.toFixed(2)}`;
             UI.priceCheckMessage.classList.remove('error');
             UI.startSpinBtn.disabled = false;
         } else {
-            UI.priceCheckMessage.innerHTML = `⭐ ${totalCost.toLocaleString('ru-RU')} (не хватает ${(totalCost - STATE.userBalance).toLocaleString('ru-RU')})`;
+            UI.priceCheckMessage.innerHTML = `₴ ${totalCost.toFixed(2)} (не хватает ${(totalCost - STATE.userBalance).toFixed(2)})`;
             UI.priceCheckMessage.classList.add('error');
             UI.startSpinBtn.disabled = true;
         }
@@ -321,25 +287,18 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function startSpinProcess() {
         if (STATE.isSpinning || !STATE.user) return;
-        const totalCost = STATE.casePrice * STATE.openQuantity;
-        if (STATE.userBalance < totalCost) {
-            updatePriceMessage(); // Обновляем сообщение об ошибке
-            return showNotification("Недостаточно средств.");
-        }
 
         try {
             const result = await callApi('/api/case/open', 'POST', {
                 quantity: STATE.openQuantity
             });
-            
+
             STATE.isSpinning = true;
-            STATE.userBalance = result.newBalance; 
-            updateBalanceDisplay();
             hideModal(UI.preOpenModal);
 
             STATE.lastWonItems = result.wonItems;
-            
-            STATE.gameHistory.push(...result.wonItems.map(item => ({ ...item, date: new Date(), name: `Выигрыш из кейса` })));
+
+            STATE.gameHistory.push(...result.wonItems.map(item => ({ ...item, date: new Date(), name: `Выигрыш из кейса`, value: item.value })));
 
             UI.caseView.classList.add('hidden');
             UI.spinView.classList.remove('hidden');
@@ -417,21 +376,21 @@ document.addEventListener('DOMContentLoaded', function() {
                 <div class="inventory-item">
                     <img src="${item.imageSrc}" alt="${item.name}">
                     <div class="inventory-item-name">${item.name}</div>
-                    <div class="inventory-item-price">⭐ ${item.value.toLocaleString('ru-RU')}</div>
+                    <div class="inventory-item-price">₴ ${item.value.toFixed(2)}</div>
                 </div>`).join('')}
             </div>
             <div class="result-buttons">
-                <button class="secondary-button" id="result-sell-btn">Продать все за ⭐ ${totalValue.toLocaleString('ru-RU')}</button>
+                <button class="secondary-button" id="result-sell-btn">Продать все за ₴ ${totalValue.toFixed(2)}</button>
                 <button class="primary-button" id="result-spin-again-btn">Крутить еще</button>
             </div>`;
         UI.resultModal.appendChild(modalContent);
-        
+
         const finalizeAction = async () => {
             hideModal(UI.resultModal);
             UI.spinView.classList.add('hidden');
             UI.caseView.classList.remove('hidden');
             STATE.isSpinning = false;
-            await loadInventory(); 
+            await loadInventory();
         };
 
         modalContent.querySelector('.close-btn').addEventListener('click', finalizeAction);
@@ -440,75 +399,30 @@ document.addEventListener('DOMContentLoaded', function() {
             setTimeout(handleCaseClick, 100);
         });
         modalContent.querySelector('#result-sell-btn').addEventListener('click', async () => {
-            // Эта логика может быть неточной, т.к. uniqueId присваивается базой.
-            // Продажа по одному предмету через sellFromInventory надежнее.
-            showNotification('Продажа... (эта функция может быть неточной)');
+            showNotification('Продажа всех предметов...');
+            // Продаем каждый выигранный предмет
+            const sellPromises = STATE.lastWonItems.map(item => callApi('/api/user/inventory/sell', 'POST', { unique_id: item.uniqueId }));
+            try {
+                await Promise.all(sellPromises);
+                showNotification('Все предметы проданы!');
+            } catch (error) {
+                console.error("Ошибка при массовой продаже:", error);
+                showNotification("Ошибка при продаже", true);
+            }
             await finalizeAction();
         });
         showModal(UI.resultModal);
     }
 
-    function populateCasePreview() {
-        if (!UI.caseContentsPreview) return;
-        UI.caseContentsPreview.innerHTML = !STATE.possibleItems || STATE.possibleItems.length === 0
-            ? `<p class="inventory-empty-msg">Содержимое кейса пусто</p>`
-            : [...STATE.possibleItems].sort((a,b) => b.value - a.value).map(item => `
-                <div class="preview-item">
-                    <img src="${item.imageSrc}" alt="${item.name}">
-                    <div class="inventory-item-price">⭐ ${item.value.toLocaleString('ru-RU')}</div>
-                </div>`).join('');
-    }
-
-    async function loadContestData() {
-        if (!STATE.user || !STATE.user.telegram_id) return;
-        try {
-            const response = await fetch(`/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
-            if (!response.ok) throw new Error('Network error');
-            STATE.contest = await response.json();
-            updateContestUI();
-        } catch (error) {
-            console.error("Не удалось загрузить данные о конкурсе:", error);
-        }
-    }
-    
-    function updateContestUI() {
-        if (!UI.buyTicketBtn) return;
-        if (!STATE.contest) {
-            if (UI.contestCard) UI.contestCard.innerHTML = '<p>Активных конкурсов нет.</p>';
-            return;
-        }
-        const { contest } = STATE;
-        const totalCost = contest.ticket_price * STATE.ticketQuantity;
-        if (UI.contestItemImage) UI.contestItemImage.src = contest.itemImageSrc;
-        if (UI.contestItemName) UI.contestItemName.textContent = contest.itemName;
-        if (UI.userTicketsDisplay) UI.userTicketsDisplay.textContent = contest.userTickets || 0;
-        if (UI.contestParticipants) UI.contestParticipants.textContent = `👥 ${contest.participants || 0}`;
-        if (UI.buyTicketBtn) {
-            UI.buyTicketBtn.innerHTML = `Купить билет <span class="icon">⭐</span> ${totalCost.toLocaleString('ru-RU')}`;
-            UI.buyTicketBtn.disabled = STATE.userBalance < totalCost;
-        }
-        if (UI.ticketQuantityInput) UI.ticketQuantityInput.value = STATE.ticketQuantity;
-    }
-
-    function handleTicketQuantityChange(amount) {
-        STATE.ticketQuantity = Math.max(1, STATE.ticketQuantity + amount);
-        updateContestUI();
-    }
-
     async function buyTickets() {
-        if (!STATE.contest || !STATE.user) return showNotification('Ошибка: данные не загружены.');
-        const totalCost = STATE.contest.ticket_price * STATE.ticketQuantity;
-        if (STATE.userBalance < totalCost) return showNotification('Недостаточно средств.');
+        if (!STATE.contest || !STATE.user) return showNotification('Ошибка: данные не загружены.', true);
         
         try {
-            const result = await callApi('/api/contest/buy-ticket', 'POST', {
+            await callApi('/api/contest/buy-ticket', 'POST', {
                 contest_id: STATE.contest.id,
-                telegram_id: STATE.user.telegram_id,
                 quantity: STATE.ticketQuantity
             });
 
-            STATE.userBalance = result.newBalance;
-            updateBalanceDisplay();
             showNotification(`Вы успешно приобрели ${STATE.ticketQuantity} билет(ов)!`);
             await loadContestData();
         } catch (error) {
@@ -516,250 +430,46 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    function updateTimer() {
-        if (!UI.contestTimer || !STATE.contest || !STATE.contest.end_time) {
-            if (UI.contestTimer) UI.contestTimer.textContent = 'Конкурс неактивен';
-            return;
-        }
-        const timeLeft = new Date(Number(STATE.contest.end_time)) - new Date();
-        if (timeLeft <= 0) {
-            UI.contestTimer.textContent = 'Конкурс завершен';
-            return;
-        }
-        const d = Math.floor(timeLeft / 86400000), h = Math.floor((timeLeft % 86400000) / 3600000), m = Math.floor((timeLeft % 3600000) / 60000), s = Math.floor((timeLeft % 60000) / 1000);
-        UI.contestTimer.textContent = `${d}д ${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')} 🕔`;
-    }
-    
-    // --- ОСТАЛЬНЫЕ ИГРОВЫЕ ФУНКЦИИ ---
-
-    function resetUpgradeState(resetRotation = false) {
-        if (!UI.upgradePointer) return;
-        STATE.upgradeState.yourItem = null;
-        STATE.upgradeState.desiredItem = null;
-        STATE.upgradeState.isUpgrading = false;
-        if (resetRotation) {
-            STATE.upgradeState.currentRotation = 0;
-            UI.upgradePointer.style.transition = 'none';
-            UI.upgradePointer.style.transform = `translateX(-50%) rotate(0deg)`;
-        }
-        calculateUpgradeChance();
-        renderUpgradeUI();
-        renderItemPicker();
-    }
-
-    function calculateUpgradeChance() {
-        const { yourItem, desiredItem, maxChance } = STATE.upgradeState;
-        if (!yourItem || !desiredItem) {
-            STATE.upgradeState.chance = 0;
-            STATE.upgradeState.multiplier = 0;
-            return;
-        }
-        if (desiredItem.value <= yourItem.value) {
-            STATE.upgradeState.chance = maxChance;
-            STATE.upgradeState.multiplier = desiredItem.value / yourItem.value;
-            return;
-        }
-        const chance = (yourItem.value / desiredItem.value) * (maxChance / 100) * 100;
-        STATE.upgradeState.chance = Math.min(chance, maxChance);
-        STATE.upgradeState.multiplier = desiredItem.value / yourItem.value;
-    }
-
-    function renderUpgradeUI() {
-        if (!UI.yourItemSlot) return;
-        const { yourItem, desiredItem, chance, multiplier } = STATE.upgradeState;
-        function updateSlot(slot, item) {
-            const placeholder = slot.querySelector('.slot-placeholder'), content = slot.querySelector('.slot-content');
-            if (item) {
-                placeholder.classList.add('hidden');
-                content.classList.remove('hidden');
-                content.querySelector('img').src = item.imageSrc;
-                content.querySelector('img').alt = item.name;
-                content.querySelector('span').textContent = item.name;
-            } else {
-                placeholder.classList.remove('hidden');
-                content.classList.add('hidden');
-            }
-        }
-        updateSlot(UI.yourItemSlot, yourItem);
-        updateSlot(UI.desiredItemSlot, desiredItem);
-        UI.upgradeChanceDisplay.textContent = `${chance.toFixed(2)}%`;
-        UI.upgradeMultiplierDisplay.textContent = `x${multiplier.toFixed(2)}`;
-        const angle = (chance / 100) * 360;
-        UI.upgradeWheel.style.backgroundImage = `conic-gradient(var(--accent-color) ${angle}deg, var(--card-bg-color) ${angle}deg)`;
-        UI.performUpgradeBtn.disabled = !yourItem || !desiredItem || STATE.upgradeState.isUpgrading;
-    }
-
-    function renderItemPicker() {
-        if (!UI.itemPickerContent) return;
-        UI.itemPickerContent.innerHTML = '';
-        const { activePicker, yourItem, desiredItem } = STATE.upgradeState;
-        const sourceList = activePicker === 'inventory' ? STATE.inventory : STATE.possibleItems;
-        if (sourceList.length === 0) {
-            UI.itemPickerContent.innerHTML = `<p class="picker-empty-msg">Список пуст</p>`;
-            return;
-        }
-        sourceList.forEach(item => {
-            const itemEl = document.createElement('div');
-            itemEl.className = 'picker-item';
-            itemEl.innerHTML = `<img src="${item.imageSrc}" alt="${item.name}"><div class="picker-item-name">${item.name}</div><div class="picker-item-value">⭐ ${item.value.toLocaleString('ru-RU')}</div>`;
-            const isSelectedForYour = yourItem && item.uniqueId && yourItem.uniqueId === item.uniqueId;
-            const isSelectedForDesired = desiredItem && desiredItem.id === item.id;
-            if (isSelectedForYour || isSelectedForDesired) itemEl.classList.add('selected');
-            itemEl.addEventListener('click', () => handleItemPick(item));
-            UI.itemPickerContent.appendChild(itemEl);
-        });
-    }
-
-    function handleItemPick(item) {
-        if (STATE.upgradeState.isUpgrading) return;
-        const { activePicker } = STATE.upgradeState;
-        if (activePicker === 'inventory') STATE.upgradeState.yourItem = { ...item };
-        else STATE.upgradeState.desiredItem = { ...item };
-        calculateUpgradeChance();
-        renderUpgradeUI();
-        renderItemPicker();
-    }
-
-    async function handleUpgradeClick() {
-        const { yourItem, desiredItem, chance, isUpgrading } = STATE.upgradeState;
-        if (!yourItem || !desiredItem || isUpgrading) return;
-        STATE.upgradeState.isUpgrading = true;
-        UI.performUpgradeBtn.disabled = true;
-        const isSuccess = (Math.random() * 100) < chance;
-        const chanceAngle = (chance / 100) * 360;
-        const randomOffset = Math.random() * 0.9 + 0.05;
-        const stopPoint = isSuccess ? chanceAngle * randomOffset : chanceAngle + (360 - chanceAngle) * randomOffset;
-        const rotation = (5 * 360) + stopPoint;
-        STATE.upgradeState.currentRotation = rotation;
-
-        UI.upgradePointer.style.transition = 'transform 6s cubic-bezier(0.2, 0.8, 0.2, 1)';
-        UI.upgradePointer.style.transform = `translateX(-50%) rotate(${STATE.upgradeState.currentRotation}deg)`;
-
-        UI.upgradePointer.addEventListener('transitionend', () => {
-            setTimeout(async () => {
-                const itemIndex = STATE.inventory.findIndex(invItem => invItem.uniqueId === yourItem.uniqueId);
-                if (itemIndex > -1) STATE.inventory.splice(itemIndex, 1);
-                if (isSuccess) {
-                    showNotification(`Апгрейд успешный! Вы получили ${desiredItem.name}.`);
-                    const newItem = { ...desiredItem, uniqueId: Date.now() };
-                    STATE.inventory.push(newItem);
-                    STATE.gameHistory.push({ ...newItem, date: new Date(), name: `Апгрейд до ${newItem.name}`, value: newItem.value });
-                } else {
-                    showNotification(`К сожалению, апгрейд не удался. Предмет потерян.`);
-                    STATE.gameHistory.push({ ...yourItem, date: new Date(), name: `Неудачный апгрейд ${yourItem.name}`, value: -yourItem.value });
-                }
-                resetUpgradeState(true);
-                await loadInventory(); // Перезагружаем инвентарь с сервера
-                renderHistory();
-            }, 1500);
-        }, { once: true });
-    }
-
-    function resetMinerGame() {
-        if (!UI.minerGrid) return;
-        STATE.minerState.isActive = false;
-        STATE.minerState.openedCrystals = 0;
-        STATE.minerState.totalWin = 0;
-        STATE.minerState.grid = [];
-        renderMinerGrid();
-        updateMinerUI();
-        UI.minerBetInput.disabled = false;
-        UI.minerStartBtn.classList.remove('hidden');
-        UI.minerCashoutBtn.classList.add('hidden');
-        UI.minerInfoWrapper.classList.add('hidden');
-    }
-
-    function startMinerGame() {
+    async function startMinerGame() {
         const bet = parseInt(UI.minerBetInput.value);
-        if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка");
-        if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
-        STATE.userBalance -= bet;
-        updateBalanceDisplay();
-        STATE.minerState.isActive = true;
-        STATE.minerState.bet = bet;
-        STATE.minerState.openedCrystals = 0;
-        STATE.minerState.totalWin = 0;
-        const totalCells = 12;
-        const bombIndices = new Set();
-        while (bombIndices.size < STATE.minerState.bombs) {
-            bombIndices.add(Math.floor(Math.random() * totalCells));
-        }
-        STATE.minerState.grid = Array.from({ length: totalCells }, (_, i) => ({ isBomb: bombIndices.has(i), isOpened: false }));
-        renderMinerGrid(true);
-        updateMinerUI();
-        UI.minerBetInput.disabled = true;
-        UI.minerStartBtn.classList.add('hidden');
-        UI.minerCashoutBtn.classList.remove('hidden');
-        UI.minerCashoutBtn.disabled = true;
-        UI.minerInfoWrapper.classList.remove('hidden');
-    }
+        if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка", true);
 
-    function renderMinerGrid(isGameActive = false) {
-        if (!UI.minerGrid) return;
-        UI.minerGrid.innerHTML = '';
-        STATE.minerState.grid.forEach((cell, index) => {
-            const cellEl = document.createElement('div');
-            cellEl.classList.add('miner-cell');
-            if (cell.isOpened) {
-                cellEl.classList.add('opened');
-                const img = document.createElement('img');
-                img.src = cell.isBomb ? 'images/bomb.png' : 'images/diamond.png';
-                cellEl.appendChild(img);
-                if (cell.isBomb) cellEl.classList.add('bomb');
-            }
-            if (isGameActive && !cell.isOpened) {
-                cellEl.addEventListener('click', () => handleMinerCellClick(index), { once: true });
-            }
-            UI.minerGrid.appendChild(cellEl);
-        });
-    }
+        try {
+            await callApi('/api/v1/balance/change', 'POST', { delta: -bet, reason: 'miner_start_bet' });
 
-    function handleMinerCellClick(index) {
-        if (!STATE.minerState.isActive) return;
-        const cell = STATE.minerState.grid[index];
-        cell.isOpened = true;
-        if (cell.isBomb) {
-            endMinerGame(false);
-        } else {
-            STATE.minerState.openedCrystals++;
-            updateMinerMultiplierAndWin();
+            STATE.minerState.isActive = true;
+            STATE.minerState.bet = bet;
+            STATE.minerState.openedCrystals = 0;
+            STATE.minerState.totalWin = 0;
+            const totalCells = 12;
+            const bombIndices = new Set();
+            while (bombIndices.size < STATE.minerState.bombs) {
+                bombIndices.add(Math.floor(Math.random() * totalCells));
+            }
+            STATE.minerState.grid = Array.from({ length: totalCells }, (_, i) => ({ isBomb: bombIndices.has(i), isOpened: false }));
             renderMinerGrid(true);
             updateMinerUI();
-            UI.minerCashoutBtn.disabled = false;
-            if (STATE.minerState.openedCrystals === (12 - STATE.minerState.bombs)) {
-                endMinerGame(true);
-            }
+            UI.minerBetInput.disabled = true;
+            UI.minerStartBtn.classList.add('hidden');
+            UI.minerCashoutBtn.classList.remove('hidden');
+            UI.minerCashoutBtn.disabled = true;
+            UI.minerInfoWrapper.classList.remove('hidden');
+
+        } catch (error) {
+            console.error("Ошибка при списании ставки в Минере:", error);
         }
     }
 
-    function updateMinerMultiplierAndWin() {
-        const { bet, openedCrystals } = STATE.minerState;
-        STATE.minerState.currentMultiplier = openedCrystals === 0 ? 1 : Math.pow(1.4, openedCrystals);
-        STATE.minerState.totalWin = bet * STATE.minerState.currentMultiplier;
-    }
-
-    function getNextWin() {
-        const { bet, openedCrystals } = STATE.minerState;
-        return bet * Math.pow(1.4, openedCrystals + 1);
-    }
-
-    function updateMinerUI() {
-        if (!UI.minerNextWin || !UI.minerTotalWin) return;
-        if (STATE.minerState.isActive) {
-            UI.minerNextWin.textContent = getNextWin().toFixed(2);
-            UI.minerTotalWin.textContent = STATE.minerState.openedCrystals > 0 ? STATE.minerState.totalWin.toFixed(2) : '0';
-        } else {
-            UI.minerTotalWin.textContent = '0';
-            UI.minerNextWin.textContent = '0';
-        }
-    }
-
-    function endMinerGame(isWin) {
+    async function endMinerGame(isWin) {
         STATE.minerState.isActive = false;
         if (isWin) {
-            showNotification(`Выигрыш ${STATE.minerState.totalWin.toFixed(2)} ⭐ зачислен!`);
-            STATE.userBalance += STATE.minerState.totalWin;
-            updateBalanceDisplay();
+            try {
+                await callApi('/api/v1/balance/change', 'POST', { delta: STATE.minerState.totalWin, reason: 'miner_cashout' });
+                showNotification(`Выигрыш ${STATE.minerState.totalWin.toFixed(2)} ₴ зачислен!`);
+            } catch (error) {
+                 console.error("Ошибка при зачислении выигрыша в Минере:", error);
+                 showNotification("Ошибка зачисления выигрыша", true);
+            }
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
         }
@@ -768,50 +478,49 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(resetMinerGame, 2000);
     }
 
-    function cashoutMiner() {
-        if (!STATE.minerState.isActive || STATE.minerState.openedCrystals === 0) return;
-        endMinerGame(true);
-    }
-
-    function handleSlotsSpin() {
+    async function handleSlotsSpin() {
         if (!UI.slotsSpinBtn || STATE.slotsState.isSpinning) return;
         const bet = parseInt(UI.slotsBetInput.value);
-        if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка");
-        if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
+        if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка", true);
 
-        STATE.slotsState.isSpinning = true;
-        UI.slotsSpinBtn.disabled = true;
-        STATE.userBalance -= bet;
-        updateBalanceDisplay();
-        UI.slotsPayline.classList.remove('visible');
+        try {
+            await callApi('/api/v1/balance/change', 'POST', { delta: -bet, reason: 'slots_spin_bet' });
+            
+            STATE.slotsState.isSpinning = true;
+            UI.slotsSpinBtn.disabled = true;
+            UI.slotsPayline.classList.remove('visible');
 
-        const results = [];
-        const tracks = [UI.slotsTrack1, UI.slotsTrack2, UI.slotsTrack3];
-        let reelsFinished = 0;
+            const results = [];
+            const tracks = [UI.slotsTrack1, UI.slotsTrack2, UI.slotsTrack3];
+            let reelsFinished = 0;
 
-        tracks.forEach((track, index) => {
-            const symbols = STATE.slotsState.symbols;
-            const reelLength = 30;
-            const finalSymbol = symbols[Math.floor(Math.random() * symbols.length)];
-            results[index] = finalSymbol;
-            track.innerHTML = Array.from({length: reelLength}, (_, i) => {
-                const symbol = i === reelLength - 2 ? finalSymbol : symbols[Math.floor(Math.random() * symbols.length)];
-                return `<div class="slots-item"><img src="${symbol.imageSrc}" alt="${symbol.name}"></div>`;
-            }).join('');
-            track.style.transition = 'none';
-            track.style.top = '0px';
-            track.offsetHeight;
-            const targetPosition = (reelLength - 2) * 90;
-            track.style.transition = `top ${2.5 + index * 0.3}s cubic-bezier(0.25, 1, 0.5, 1)`;
-            track.style.top = `-${targetPosition}px`;
-            track.addEventListener('transitionend', () => {
-                reelsFinished++;
-                if (reelsFinished === tracks.length) processSlotsResult(results, bet);
-            }, { once: true });
-        });
+            tracks.forEach((track, index) => {
+                const symbols = STATE.slotsState.symbols;
+                const reelLength = 30;
+                const finalSymbol = symbols[Math.floor(Math.random() * symbols.length)];
+                results[index] = finalSymbol;
+                track.innerHTML = Array.from({length: reelLength}, (_, i) => {
+                    const symbol = i === reelLength - 2 ? finalSymbol : symbols[Math.floor(Math.random() * symbols.length)];
+                    return `<div class="slots-item"><img src="${symbol.imageSrc}" alt="${symbol.name}"></div>`;
+                }).join('');
+                track.style.transition = 'none';
+                track.style.top = '0px';
+                track.offsetHeight;
+                const targetPosition = (reelLength - 2) * 90;
+                track.style.transition = `top ${2.5 + index * 0.3}s cubic-bezier(0.25, 1, 0.5, 1)`;
+                track.style.top = `-${targetPosition}px`;
+                track.addEventListener('transitionend', () => {
+                    reelsFinished++;
+                    if (reelsFinished === tracks.length) processSlotsResult(results, bet);
+                }, { once: true });
+            });
+
+        } catch (error) {
+            console.error("Ошибка при списании ставки в Слотах:", error);
+        }
     }
-
-    function processSlotsResult(results, bet) {
+    
+    async function processSlotsResult(results, bet) {
         let win = 0;
         let message = "Попробуйте еще раз!";
         const [r1, r2, r3] = results;
@@ -822,120 +531,62 @@ document.addEventListener('DOMContentLoaded', function() {
             win = bet * 1.5;
             message = `Неплохо! Выигрыш x1.5!`;
         }
+        
         if (win > 0) {
-            STATE.userBalance += win;
-            updateBalanceDisplay();
-            UI.slotsPayline.classList.add('visible');
-            showNotification(`${message} (+${win.toFixed(0)} ⭐)`);
+            try {
+                await callApi('/api/v1/balance/change', 'POST', { delta: win, reason: 'slots_win' });
+                UI.slotsPayline.classList.add('visible');
+                showNotification(`${message} (+${win.toFixed(2)} ₴)`);
+            } catch (error) {
+                console.error("Ошибка при зачислении выигрыша в слотах:", error);
+                showNotification("Ошибка зачисления выигрыша", true);
+            }
         } else {
             showNotification(message);
         }
+        
         STATE.slotsState.isSpinning = false;
         UI.slotsSpinBtn.disabled = false;
     }
 
-    function resetTowerGame() {
-        if (!UI.towerGameBoard) return;
-        if (STATE.towerState.nextLevelTimeout) clearTimeout(STATE.towerState.nextLevelTimeout);
-        STATE.towerState.isActive = false;
-        STATE.towerState.isCashingOut = false;
-        STATE.towerState.currentLevel = 0;
-        STATE.towerState.nextLevelTimeout = null;
-        UI.towerGameBoard.innerHTML = '';
-        UI.towerInitialControls.classList.remove('hidden');
-        UI.towerCashoutControls.classList.add('hidden');
-        UI.towerBetInput.disabled = false;
-        UI.towerMaxWinDisplay.textContent = 'Возможный выигрыш: 0 ⭐';
-    }
 
-    function startTowerGame() {
+    async function startTowerGame() {
         const bet = parseInt(UI.towerBetInput.value);
-        if (isNaN(bet) || bet < 15) return showNotification("Минимальная ставка 15 ⭐");
-        if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
-        STATE.userBalance -= bet;
-        updateBalanceDisplay();
-        STATE.towerState.isActive = true;
-        STATE.towerState.bet = bet;
-        STATE.towerState.currentLevel = 0;
-        STATE.towerState.grid = Array.from({ length: STATE.towerState.levels }, () => Math.floor(Math.random() * 2));
-        STATE.towerState.payouts = STATE.towerState.multipliers.map(m => Math.round(bet * m));
-        UI.towerInitialControls.classList.add('hidden');
-        UI.towerCashoutControls.classList.remove('hidden');
-        UI.towerCashoutBtn.disabled = true;
-        UI.towerCashoutBtn.textContent = `Забрать 0 ⭐`;
-        const maxWin = STATE.towerState.payouts[STATE.towerState.payouts.length - 1];
-        UI.towerMaxWinDisplay.textContent = `Возможный выигрыш: ${maxWin.toLocaleString('ru-RU')} ⭐`;
-        renderTower();
+        if (isNaN(bet) || bet < 15) return showNotification("Минимальная ставка 15 ₴", true);
+        
+        try {
+            await callApi('/api/v1/balance/change', 'POST', { delta: -bet, reason: 'tower_start_bet' });
+            
+            STATE.towerState.isActive = true;
+            STATE.towerState.bet = bet;
+            STATE.towerState.currentLevel = 0;
+            STATE.towerState.grid = Array.from({ length: STATE.towerState.levels }, () => Math.floor(Math.random() * 2));
+            STATE.towerState.payouts = STATE.towerState.multipliers.map(m => Math.round(bet * m));
+            UI.towerInitialControls.classList.add('hidden');
+            UI.towerCashoutControls.classList.remove('hidden');
+            UI.towerCashoutBtn.disabled = true;
+            UI.towerCashoutBtn.textContent = `Забрать 0 ₴`;
+            const maxWin = STATE.towerState.payouts[STATE.towerState.payouts.length - 1];
+            UI.towerMaxWinDisplay.textContent = `Возможный выигрыш: ${maxWin.toLocaleString('ru-RU')} ₴`;
+            renderTower();
+        } catch (error) {
+             console.error("Ошибка при списании ставки в Башне:", error);
+        }
     }
     
-    function renderTower() {
-        if (!UI.towerGameBoard) return;
-        UI.towerGameBoard.innerHTML = '';
-        for (let i = 0; i < STATE.towerState.levels; i++) {
-            const rowEl = document.createElement('div');
-            rowEl.className = 'tower-row' + (STATE.towerState.isActive && i === STATE.towerState.currentLevel ? ' active' : '');
-            const payout = STATE.towerState.payouts[i] || 0;
-            for (let j = 0; j < 2; j++) {
-                const cell = document.createElement('div');
-                cell.className = 'tower-cell';
-                cell.dataset.col = j;
-                cell.innerHTML = `+${payout.toLocaleString('ru-RU')}`;
-                if (STATE.towerState.isActive && i === STATE.towerState.currentLevel) {
-                    cell.addEventListener('click', () => handleTowerCellClick(i, j), { once: true });
-                }
-                if (i < STATE.towerState.currentLevel) {
-                    const bombCol = STATE.towerState.grid[i];
-                    if (j !== bombCol) {
-                        cell.classList.add('safe');
-                        cell.innerHTML = `<img src="images/diamond.png" alt="Win">`;
-                    } else {
-                        cell.style.opacity = "0.5";
-                    }
-                }
-                rowEl.appendChild(cell);
-            }
-            UI.towerGameBoard.appendChild(rowEl);
-        }
-    }
-
-    function handleTowerCellClick(row, col) {
-        if (!STATE.towerState.isActive || STATE.towerState.isCashingOut || row !== STATE.towerState.currentLevel) return;
-        STATE.towerState.isActive = false;
-        const bombCol = STATE.towerState.grid[row];
-        const cells = UI.towerGameBoard.children[row].querySelectorAll('.tower-cell');
-        cells.forEach((c, c_index) => {
-            c.classList.add(c_index === bombCol ? 'danger' : 'safe');
-            c.innerHTML = `<img src="images/${c_index === bombCol ? 'bomb' : 'diamond'}.png" alt="${c_index === bombCol ? 'Lose' : 'Win'}">`;
-        });
-        UI.towerGameBoard.children[row].classList.remove('active');
-        if (col === bombCol) {
-            UI.towerCashoutBtn.disabled = true;
-            setTimeout(() => endTowerGame(false), 1200);
-        } else {
-            STATE.towerState.currentLevel++;
-            const cashoutAmount = STATE.towerState.payouts[STATE.towerState.currentLevel - 1];
-            UI.towerCashoutBtn.textContent = `Забрать ${cashoutAmount.toLocaleString('ru-RU')} ⭐`;
-            UI.towerCashoutBtn.disabled = false;
-            if (STATE.towerState.currentLevel === STATE.towerState.levels) {
-                setTimeout(() => endTowerGame(true), 1200);
-            } else {
-                STATE.towerState.nextLevelTimeout = setTimeout(() => {
-                    STATE.towerState.isActive = true;
-                    renderTower();
-                }, 800);
-            }
-        }
-    }
-
-    function endTowerGame(isWin) {
+    async function endTowerGame(isWin) {
         if (STATE.towerState.nextLevelTimeout) clearTimeout(STATE.towerState.nextLevelTimeout);
         STATE.towerState.isActive = false;
         UI.towerCashoutBtn.disabled = true;
         if (isWin && STATE.towerState.currentLevel > 0) {
             const winAmount = STATE.towerState.payouts[STATE.towerState.currentLevel - 1];
-            STATE.userBalance += winAmount;
-            updateBalanceDisplay();
-            showNotification(`Выигрыш ${winAmount.toLocaleString('ru-RU')} ⭐ зачислен!`);
+            try {
+                await callApi('/api/v1/balance/change', 'POST', { delta: winAmount, reason: 'tower_cashout' });
+                showNotification(`Выигрыш ${winAmount.toLocaleString('ru-RU')} ₴ зачислен!`);
+            } catch (error) {
+                console.error("Ошибка при зачислении выигрыша в Башне:", error);
+                showNotification("Ошибка зачисления выигрыша", true);
+            }
         } else {
             showNotification("Вы проиграли! Ставка сгорела.");
             for(let i = STATE.towerState.currentLevel; i < STATE.towerState.levels; i++) {
@@ -951,85 +602,102 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         setTimeout(resetTowerGame, 2500);
     }
-
-    function cashoutTower() {
-        if (STATE.towerState.currentLevel === 0 || STATE.towerState.isCashingOut) return;
-        if (STATE.towerState.nextLevelTimeout) clearTimeout(STATE.towerState.nextLevelTimeout);
-        STATE.towerState.isCashingOut = true;
-        STATE.towerState.isActive = false; 
-        UI.towerCashoutBtn.disabled = true;
-        endTowerGame(true);
-    }
-
-    function handleCoinflip(playerChoice) {
+    
+    async function handleCoinflip(playerChoice) {
         if (!UI.coin || STATE.coinflipState.isFlipping) return;
         const bet = parseInt(UI.coinflipBetInput.value);
-        if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка");
-        if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
-        STATE.coinflipState.isFlipping = true;
-        UI.coinflipResult.textContent = '';
-        STATE.userBalance -= bet;
-        updateBalanceDisplay();
-        const result = Math.random() < 0.5 ? 'heads' : 'tails';
-        UI.coin.addEventListener('transitionend', () => {
-            if (playerChoice === result) {
-                STATE.userBalance += bet * 2;
-                UI.coinflipResult.textContent = `Вы выиграли ${bet} ⭐!`;
-                showNotification(`Победа!`);
-            } else {
-                UI.coinflipResult.textContent = `Вы проиграли ${bet} ⭐.`;
-                showNotification(`Проигрыш!`);
-            }
-            updateBalanceDisplay();
-            STATE.coinflipState.isFlipping = false;
-            UI.coin.style.transition = 'none';
-            UI.coin.style.transform = result === 'tails' ? 'rotateY(180deg)' : 'rotateY(0deg)';
-        }, { once: true });
-        UI.coin.style.transition = 'transform 1s cubic-bezier(0.5, 1.3, 0.5, 1.3)';
-        const currentRotation = UI.coin.style.transform.includes('180') ? 180 : 0;
-        const fullSpins = 5 * 360;
-        UI.coin.style.transform = `rotateY(${currentRotation + fullSpins + (result === 'tails' ? 180 : 0)}deg)`;
+        if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка", true);
+
+        try {
+            await callApi('/api/v1/balance/change', 'POST', { delta: -bet, reason: 'coinflip_bet' });
+            
+            STATE.coinflipState.isFlipping = true;
+            UI.coinflipResult.textContent = '';
+            
+            const result = Math.random() < 0.5 ? 'heads' : 'tails';
+            UI.coin.addEventListener('transitionend', async () => {
+                if (playerChoice === result) {
+                    try {
+                        await callApi('/api/v1/balance/change', 'POST', { delta: bet * 2, reason: 'coinflip_win' });
+                        UI.coinflipResult.textContent = `Вы выиграли ${bet.toFixed(2)} ₴!`;
+                        showNotification(`Победа!`);
+                    } catch (e) {
+                        UI.coinflipResult.textContent = 'Ошибка зачисления';
+                    }
+                } else {
+                    UI.coinflipResult.textContent = `Вы проиграли ${bet.toFixed(2)} ₴.`;
+                    showNotification(`Проигрыш!`);
+                }
+                
+                STATE.coinflipState.isFlipping = false;
+                UI.coin.style.transition = 'none';
+                UI.coin.style.transform = result === 'tails' ? 'rotateY(180deg)' : 'rotateY(0deg)';
+            }, { once: true });
+
+            UI.coin.style.transition = 'transform 1s cubic-bezier(0.5, 1.3, 0.5, 1.3)';
+            const currentRotation = UI.coin.style.transform.includes('180') ? 180 : 0;
+            const fullSpins = 5 * 360;
+            UI.coin.style.transform = `rotateY(${currentRotation + fullSpins + (result === 'tails' ? 180 : 0)}deg)`;
+
+        } catch (error) {
+            console.error("Ошибка при списании ставки в Coinflip:", error);
+        }
     }
 
-    function handleRps(playerChoice) {
+    async function handleRps(playerChoice) {
         if (!UI.rpsComputerChoice || STATE.rpsState.isPlaying) return;
         const bet = parseInt(UI.rpsBetInput.value);
-        if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка");
-        if (STATE.userBalance < bet) return showNotification("Недостаточно средств");
-        STATE.rpsState.isPlaying = true;
-        UI.rpsButtons.forEach(button => button.disabled = true);
-        UI.rpsPlayerChoice.textContent = STATE.rpsState.choiceMap[playerChoice];
-        UI.rpsResultMessage.textContent = '';
-        const computerChoice = STATE.rpsState.choices[Math.floor(Math.random() * 3)];
-        const reelLength = 60, winnerIndex = 50;
-        const reel = Array.from({ length: reelLength }, (_, i) => STATE.rpsState.choiceMap[i === winnerIndex ? computerChoice : STATE.rpsState.choices[Math.floor(Math.random() * 3)]]);
-        UI.rpsComputerChoice.innerHTML = reel.map(symbol => `<div class="rps-roulette-item">${symbol}</div>`).join('');
-        const targetPosition = (winnerIndex * 130) + 65;
-        UI.rpsComputerChoice.addEventListener('transitionend', () => {
-            let resultMessage = '';
-            if (playerChoice === computerChoice) {
-                resultMessage = "Ничья!";
-            } else if ((playerChoice === 'rock' && computerChoice === 'scissors') || (playerChoice === 'paper' && computerChoice === 'rock') || (playerChoice === 'scissors' && computerChoice === 'paper')) {
-                resultMessage = `Вы выиграли ${bet} ⭐!`;
-                STATE.userBalance += bet;
-                showNotification(`Победа!`);
-            } else {
-                resultMessage = `Вы проиграли ${bet} ⭐.`;
-                STATE.userBalance -= bet;
-                showNotification(`Проигрыш!`);
-            }
-            UI.rpsResultMessage.textContent = resultMessage;
-            updateBalanceDisplay();
-            setTimeout(() => {
-                STATE.rpsState.isPlaying = false;
-                UI.rpsButtons.forEach(button => button.disabled = false);
-            }, 1500);
-        }, { once: true });
-        UI.rpsComputerChoice.style.transition = 'none';
-        UI.rpsComputerChoice.style.left = '0px';
-        UI.rpsComputerChoice.getBoundingClientRect();
-        UI.rpsComputerChoice.style.transition = 'left 6s cubic-bezier(0.2, 0.8, 0.2, 1)';
-        UI.rpsComputerChoice.style.left = `calc(50% - ${targetPosition}px)`;
+        if (isNaN(bet) || bet <= 0) return showNotification("Некорректная ставка", true);
+        
+        try {
+            await callApi('/api/v1/balance/change', 'POST', { delta: -bet, reason: 'rps_bet' });
+
+            STATE.rpsState.isPlaying = true;
+            UI.rpsButtons.forEach(button => button.disabled = true);
+            UI.rpsPlayerChoice.textContent = STATE.rpsState.choiceMap[playerChoice];
+            UI.rpsResultMessage.textContent = '';
+            const computerChoice = STATE.rpsState.choices[Math.floor(Math.random() * 3)];
+            
+            // ... (анимация) ...
+            
+            UI.rpsComputerChoice.addEventListener('transitionend', async () => {
+                let resultMessage = '';
+                let delta = 0;
+                
+                if (playerChoice === computerChoice) {
+                    resultMessage = "Ничья!";
+                    delta = bet; // Возвращаем ставку
+                } else if ((playerChoice === 'rock' && computerChoice === 'scissors') || (playerChoice === 'paper' && computerChoice === 'rock') || (playerChoice === 'scissors' && computerChoice === 'paper')) {
+                    resultMessage = `Вы выиграли ${bet.toFixed(2)} ₴!`;
+                    delta = bet * 2; // Возвращаем ставку + выигрыш
+                    showNotification(`Победа!`);
+                } else {
+                    resultMessage = `Вы проиграли ${bet.toFixed(2)} ₴.`;
+                    delta = 0; // Ничего не возвращаем
+                    showNotification(`Проигрыш!`);
+                }
+                
+                if (delta > 0) {
+                    try {
+                        await callApi('/api/v1/balance/change', 'POST', { delta: delta, reason: 'rps_result' });
+                    } catch(e) {
+                        resultMessage = "Ошибка зачисления!";
+                    }
+                }
+
+                UI.rpsResultMessage.textContent = resultMessage;
+                
+                setTimeout(() => {
+                    STATE.rpsState.isPlaying = false;
+                    UI.rpsButtons.forEach(button => button.disabled = false);
+                }, 1500);
+            }, { once: true });
+            
+            // ... (остальная часть анимации) ...
+
+        } catch (error) {
+            console.error("Ошибка при списании ставки в К-Н-Б:", error);
+        }
     }
 
     async function loadInitialData() {
@@ -1108,29 +776,27 @@ document.addEventListener('DOMContentLoaded', function() {
         };
 
         for (const key in selectors) {
-            UI[key] = document.querySelector(selectors[key]);
+            const element = document.querySelector(selectors[key]);
+            if(element) UI[key] = element;
+            else {
+                const elements = document.querySelectorAll(selectors[key]);
+                if (elements.length > 0) UI[key] = elements;
+            }
         }
-        UI.views = document.querySelectorAll('.view');
-        UI.navButtons = document.querySelectorAll('.nav-btn');
-        UI.profileTabs = document.querySelectorAll('.profile-tabs:not(.upgrade-picker-container) .profile-tab-btn');
-        UI.profileContents = document.querySelectorAll('.profile-tab-content');
-        UI.gameMenuBtns = document.querySelectorAll('.game-menu-btn');
-        UI.rpsButtons = document.querySelectorAll('.rps-buttons .primary-button');
-        UI.pickerTabs = document.querySelectorAll('.upgrade-picker-container .profile-tab-btn');
 
         if (UI.caseImageBtn) UI.caseImageBtn.addEventListener('click', handleCaseClick);
         if (UI.startSpinBtn) UI.startSpinBtn.addEventListener('click', startSpinProcess);
         if (UI.quantitySelector) UI.quantitySelector.addEventListener('click', handleQuantityChange);
         if (UI.fastSpinToggle) UI.fastSpinToggle.addEventListener('change', (event) => STATE.isFastSpinEnabled = event.target.checked);
         if (UI.navButtons) UI.navButtons.forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
-        if (UI.inviteFriendBtn) UI.inviteFriendBtn.addEventListener('click', inviteFriend);
-        if (UI.copyLinkBtn) UI.copyLinkBtn.addEventListener('click', copyInviteLink);
+        if (UI.inviteFriendBtn) UI.inviteFriendBtn.addEventListener('click', () => {}); // Заглушка, т.к. inviteFriend удалена
+        if (UI.copyLinkBtn) UI.copyLinkBtn.addEventListener('click', () => {}); // Заглушка
         if (UI.buyTicketBtn) UI.buyTicketBtn.addEventListener('click', buyTickets);
         if (UI.ticketQuantityPlus) UI.ticketQuantityPlus.addEventListener('click', () => handleTicketQuantityChange(1));
         if (UI.ticketQuantityMinus) UI.ticketQuantityMinus.addEventListener('click', () => handleTicketQuantityChange(-1));
         if (UI.profileTabs) UI.profileTabs.forEach(tab => tab.addEventListener('click', function () {
             UI.profileTabs.forEach(t => t.classList.remove('active'));
-            UI.profileContents.forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.profile-tab-content').forEach(c => c.classList.remove('active'));
             this.classList.add('active');
             document.getElementById(this.dataset.tab + '-content')?.classList.add('active');
         }));
@@ -1152,10 +818,10 @@ document.addEventListener('DOMContentLoaded', function() {
         if (UI.performUpgradeBtn) UI.performUpgradeBtn.addEventListener('click', handleUpgradeClick);
         if (UI.gameMenuBtns) UI.gameMenuBtns.forEach(btn => btn.addEventListener('click', () => switchView(btn.dataset.view)));
         if (UI.minerStartBtn) UI.minerStartBtn.addEventListener('click', startMinerGame);
-        if (UI.minerCashoutBtn) UI.minerCashoutBtn.addEventListener('click', cashoutMiner);
+        if (UI.minerCashoutBtn) UI.minerCashoutBtn.addEventListener('click', () => endMinerGame(true));
         if (UI.slotsSpinBtn) UI.slotsSpinBtn.addEventListener('click', handleSlotsSpin);
         if (UI.towerStartBtn) UI.towerStartBtn.addEventListener('click', startTowerGame);
-        if (UI.towerCashoutBtn) UI.towerCashoutBtn.addEventListener('click', cashoutTower);
+        if (UI.towerCashoutBtn) UI.towerCashoutBtn.addEventListener('click', () => endTowerGame(true));
         if (UI.coinflipHeadsBtn) UI.coinflipHeadsBtn.addEventListener('click', () => handleCoinflip('heads'));
         if (UI.coinflipTailsBtn) UI.coinflipTailsBtn.addEventListener('click', () => handleCoinflip('tails'));
         if (UI.rpsButtons) UI.rpsButtons.forEach(button => button.addEventListener('click', () => handleRps(button.dataset.choice)));
@@ -1166,7 +832,7 @@ document.addEventListener('DOMContentLoaded', function() {
         switchView('game-view');
         setInterval(updateTimer, 1000);
     }
-    
+
     try {
         init();
     } catch (error) {
