@@ -29,7 +29,8 @@ app.use(express.json());
 
 // --- КОНФИГУРАЦИЯ ---
 const ADMIN_SECRET = 'Aurum';
-const BOT_API_URL = 'http://server4644.server-vps.com:8001/api/v1/balance/change'; 
+// !!! ИСПРАВЛЕНИЕ: Заменен адрес сервера на IP-адрес вашего VPS !!!
+const BOT_API_URL = 'http://91.239.235.200:8001/api/v1/balance/change';
 const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
 
 // --- Хелпер для отправки запросов к API бота ---
