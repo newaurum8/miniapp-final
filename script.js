@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 body.user_id = STATE.user.id;
                 options.body = JSON.stringify(body);
             }
-            const response = await fetch(endpoint, options);
+            const response = await fetch(`https://server4644.server-vps.com:8001${endpoint}`, options);
             const result = await response.json();
             if (!response.ok) {
                 throw new Error(result.error || 'Ошибка сервера');
@@ -74,7 +74,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function authenticateUser(tgUser) {
         try {
-            const response = await fetch('/api/user/get-or-create', {
+            const response = await fetch('https://server4644.server-vps.com:8001/api/user/get-or-create', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -91,7 +91,11 @@ document.addEventListener('DOMContentLoaded', function() {
             loadContestData();
         } catch (error) {
             console.error("Ошибка аутентификации:", error);
-            showNotification('Не удалось подключиться к серверу.');
+            if (error.message.includes('User not found')) {
+                showNotification('Пользователь не найден. Пожалуйста, сначала запустите бота.');
+            } else {
+                showNotification('Не удалось подключиться к серверу.');
+            }
         }
     }
     
@@ -122,8 +126,9 @@ document.addEventListener('DOMContentLoaded', function() {
                  console.warn("Данные пользователя Telegram не найдены. Работа в режиме гостя.");
                  if (UI.profileName) UI.profileName.textContent = "Guest";
                  if (UI.profileId) UI.profileId.textContent = "ID 0";
-                 STATE.userBalance = 1000;
+                 STATE.userBalance = 0;
                  updateBalanceDisplay();
+                 showNotification('Пожалуйста, запустите бота сначала.');
             }
         } catch (error) {
             console.error("Не удалось загрузить данные Telegram:", error);
@@ -136,7 +141,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const tg = window.Telegram.WebApp;
             const user = tg.initDataUnsafe.user;
-            const app_url = `https://t.me/YOUR_BOT_USERNAME_HERE/YOUR_APP_NAME?startapp=${user.id}`;
+            const app_url = `https://t.me/LuterBotTest1_bot/StarsDrop?startapp=${user.id}`;
             const text = `Привет! Присоединяйся к StarsDrop и получай крутые подарки!`;
             tg.openTelegramLink(`https://t.me/share/url?url=${encodeURIComponent(app_url)}&text=${encodeURIComponent(text)}`);
         } catch(e) {
@@ -149,7 +154,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const tg = window.Telegram.WebApp;
             const user = tg.initDataUnsafe.user;
-            const app_url = `https://t.me/YOUR_BOT_USERNAME_HERE/YOUR_APP_NAME?startapp=${user.id}`;
+            const app_url = `https://t.me/LuterBotTest1_bot/StarsDrop?startapp=${user.id}`;
             navigator.clipboard.writeText(app_url).then(() => {
                 showNotification('Ссылка скопирована!');
             }).catch(err => {
@@ -462,7 +467,7 @@ document.addEventListener('DOMContentLoaded', function() {
     async function loadContestData() {
         if (!STATE.user || !STATE.user.telegram_id) return;
         try {
-            const response = await fetch(`/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
+            const response = await fetch(`https://server4644.server-vps.com:8001/api/contest/current?telegram_id=${STATE.user.telegram_id}`);
             if (!response.ok) throw new Error('Network error');
             STATE.contest = await response.json();
             updateContestUI();
@@ -1034,7 +1039,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function loadInitialData() {
         try {
-            const [caseResponse, settingsResponse] = await Promise.all([ fetch('/api/case/items_full'), fetch('/api/game_settings') ]);
+            const [caseResponse, settingsResponse] = await Promise.all([ 
+                fetch('https://server4644.server-vps.com:8001/api/case/items_full'), 
+                fetch('https://server4644.server-vps.com:8001/api/game_settings') 
+            ]);
             if (!caseResponse.ok) throw new Error(`Ошибка загрузки кейсов: ${caseResponse.status}`);
             if (!settingsResponse.ok) throw new Error(`Ошибка загрузки настроек: ${settingsResponse.status}`);
             STATE.possibleItems = await caseResponse.json();

@@ -10,7 +10,7 @@ const app = express();
 const port = process.env.PORT || 3000;
 
 // !!! ИСПРАВЛЕНИЕ: Установлена правильная строка подключения к вашей базе данных NeonDB !!!
-const connectionString = 'postgresql://neondb_owner:npg_gFvZxTR7qdw1@ep-round-sound-agieqqp0-pooler.c-2.eu-central-1.aws.neon.tech/neondb?sslmode=require';
+const connectionString = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_gFvZxTR7qdw1@ep-round-sound-agieqqp0-pooler.c-2.eu-central-1.aws.neon.tech/neondb?sslmode=require';
 
 if (!connectionString) {
     console.error('Ошибка: Переменная окружения DATABASE_URL не установлена!');
@@ -29,8 +29,7 @@ app.use(express.json());
 
 // --- КОНФИГУРАЦИЯ ---
 const ADMIN_SECRET = 'Aurum';
-// !!! ИСПРАВЛЕНИЕ: Заменен адрес сервера на IP-адрес вашего VPS !!!
-const BOT_API_URL = 'http://91.239.235.200:8001/api/v1/balance/change';
+const BOT_API_URL = 'https://server4644.server-vps.com:8001/api/v1/balance/change'; 
 const MINI_APP_SECRET_KEY = "a4B!z$9pLw@cK#vG*sF7qE&rT2uY";
 
 // --- Хелпер для отправки запросов к API бота ---
@@ -57,7 +56,7 @@ async function changeBalanceInBot(telegramId, delta, reason) {
                     'X-Signature': signature
                 },
                 body: body,
-                timeout: 7000
+                timeout: 10000
             });
 
             const result = await response.json();
@@ -109,10 +108,25 @@ async function initializeDb() {
         await client.query(`
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
-                telegram_id BIGINT UNIQUE,
-                username TEXT,
-                balance INTEGER NOT NULL DEFAULT 1000,
-                user_id BIGINT UNIQUE
+                user_id BIGINT UNIQUE,
+                username VARCHAR(255),
+                chosen_currency VARCHAR(10),
+                chosen_game VARCHAR(50),
+                registration_date TIMESTAMPTZ DEFAULT NOW(),
+                balance_uah NUMERIC(10, 2) DEFAULT 0.00,
+                games_played INT DEFAULT 0,
+                total_wagered NUMERIC(10, 2) DEFAULT 0.00,
+                total_purchased_uah NUMERIC(10, 2) DEFAULT 0.00,
+                total_withdrawn_gold INT DEFAULT 0,
+                withdrawals_count INT DEFAULT 0,
+                in_yellow_list BOOLEAN DEFAULT FALSE,
+                total_purchased_uc NUMERIC(10, 2) DEFAULT 0.00,
+                total_withdrawn_uc INT DEFAULT 0,
+                withdrawals_count_uc INT DEFAULT 0,
+                total_purchased_bc NUMERIC(10, 2) DEFAULT 0.00,
+                total_withdrawn_bc INT DEFAULT 0,
+                withdrawals_count_bc INT DEFAULT 0,
+                telegram_id BIGINT UNIQUE
             );
         `);
 
@@ -202,6 +216,7 @@ async function initializeDb() {
 
         // Синхронизируем user_id с telegram_id для совместимости
         await client.query("UPDATE users SET user_id = telegram_id WHERE user_id IS NULL");
+        await client.query("UPDATE users SET telegram_id = user_id WHERE telegram_id IS NULL");
         
         console.log('База данных успешно инициализирована.');
     } catch (err) {
@@ -220,7 +235,7 @@ app.post('/api/user/get-or-create', async (req, res) => {
         return res.status(400).json({ error: "telegram_id является обязательным" });
     }
     try {
-        let userResult = await pool.query("SELECT id, telegram_id, username, balance FROM users WHERE telegram_id = $1", [telegram_id]);
+        let userResult = await pool.query("SELECT id, user_id, telegram_id, username, balance_uah as balance FROM users WHERE telegram_id = $1", [telegram_id]);
         if (userResult.rows.length > 0) {
             res.json(userResult.rows[0]);
         } else {
