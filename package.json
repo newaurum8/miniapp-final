@@ -1,20 +1,24 @@
 {
-  "name": "miniapp",
+  "name": "miniapp-final",
   "version": "1.0.0",
-  "main": "script.js",
+  "description": "Telegram Mini App with game mechanics",
+  "author": "",
+  "license": "ISC",
+  "main": "servers.js",
   "scripts": {
     "start": "node servers.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "cors": "^2.8.5",
-    "express": "^4.18.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-fetch": "^2.7.0",
     "pg": "^8.11.3",
-    "uuid": "^9.0.1",
-    "node-fetch": "^2.7.0"
+    "redis": "^4.6.13",
+    "uuid": "^9.0.1"
   }
 }
